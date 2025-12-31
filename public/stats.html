@@ -26,6 +26,7 @@
             <nav class="nav-links">
                 <a href="/configure">Configure</a>
                 <a href="/stats" class="active">Stats</a>
+                <a href="/stats/content">Cache Browser</a>
             </nav>
         </header>
 
@@ -67,25 +68,78 @@
             </div>
         </div>
 
+        <!-- Cache Performance (Phase 2.5) -->
+        <div class="card">
+            <h2>🗄️ Cache Performance</h2>
+            <div class="stats-grid" style="grid-template-columns: repeat(5, 1fr);">
+                <div class="stat-card">
+                    <div class="value" id="cacheHitRate">0%</div>
+                    <div class="label">Hit Rate</div>
+                </div>
+                <div class="stat-card">
+                    <div class="value" id="cacheEntries">0</div>
+                    <div class="label">Cached Entries</div>
+                </div>
+                <div class="stat-card">
+                    <div class="value" id="cacheContent">0</div>
+                    <div class="label">Unique Content</div>
+                </div>
+                <div class="stat-card">
+                    <div class="value" id="cacheLanguages">0</div>
+                    <div class="label">Languages</div>
+                </div>
+                <div class="stat-card">
+                    <div class="value" id="cacheSize">0 MB</div>
+                    <div class="label">Database Size</div>
+                </div>
+            </div>
+            <div style="margin-top: 12px; display: flex; gap: 16px; align-items: center;">
+                <div style="flex: 1; background: rgba(74, 144, 226, 0.2); border-radius: 8px; height: 12px; overflow: hidden;">
+                    <div id="cacheHitBar" style="height: 100%; background: linear-gradient(90deg, #4A90E2, #6BA5E7); width: 0%; transition: width 0.5s ease;"></div>
+                </div>
+                <span style="color: var(--color-text-secondary); font-size: 0.9rem;">
+                    <span id="cacheHits">0</span> hits / <span id="cacheMisses">0</span> misses
+                </span>
+            </div>
+        </div>
+
+        <!-- Provider Health (Phase 2.5) -->
+        <div class="card" id="providerCard">
+            <h2>🔌 Provider Health</h2>
+            <div class="table-responsive">
+                <table class="data-table" id="providerTable">
+                    <thead>
+                        <tr>
+                            <th>Provider</th>
+                            <th>Status</th>
+                            <th>Requests</th>
+                            <th>Success Rate</th>
+                            <th>Avg Response</th>
+                            <th>Subtitles</th>
+                        </tr>
+                    </thead>
+                    <tbody id="providerTableBody">
+                        <tr><td colspan="6" style="text-align: center; color: var(--color-text-secondary);">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
         <!-- Language Matching Stats -->
         <div class="card">
             <h2>🎯 Language Matching</h2>
-            <div class="stats-grid" style="grid-template-columns: repeat(4, 1fr);">
+            <div class="stats-grid" style="grid-template-columns: repeat(3, 1fr);">
                 <div class="stat-card">
                     <div class="value" id="primarySuccessRate">0%</div>
                     <div class="label">Primary Found Rate</div>
-                </div>
-                <div class="stat-card">
-                    <div class="value" id="secondarySuccessRate">0%</div>
-                    <div class="label">Secondary Found Rate</div>
                 </div>
                 <div class="stat-card">
                     <div class="value" id="primaryFound">0</div>
                     <div class="label">Primary Found</div>
                 </div>
                 <div class="stat-card">
-                    <div class="value" id="primaryNotFound">0</div>
-                    <div class="label">Primary Not Found</div>
+                    <div class="value" id="combinedSuccessRate">0%</div>
+                    <div class="label">Preferred Languages Rate</div>
                 </div>
             </div>
             <div style="margin-top: 20px;">
@@ -117,35 +171,39 @@
         <!-- Daily Activity -->
         <div class="card">
             <h2>📅 Recent Activity</h2>
-            <table class="data-table" id="dailyTable">
-                <thead>
-                    <tr>
-                        <th>Date</th>
-                        <th>Total</th>
-                        <th>Movies</th>
-                        <th>Series</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <!-- Populated by JS -->
-                </tbody>
-            </table>
+            <div class="table-responsive">
+                <table class="data-table" id="dailyTable">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Total</th>
+                            <th>Movies</th>
+                            <th>Series</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <!-- Populated by JS -->
+                    </tbody>
+                </table>
+            </div>
         </div>
 
         <!-- Errors -->
         <div class="card" id="errorsCard" style="display: none;">
             <h2>⚠️ Recent Errors</h2>
-            <table class="data-table" id="errorsTable">
-                <thead>
-                    <tr>
-                        <th>Time</th>
-                        <th>Message</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <!-- Populated by JS -->
-                </tbody>
-            </table>
+            <div class="table-responsive">
+                <table class="data-table" id="errorsTable">
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Message</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <!-- Populated by JS -->
+                    </tbody>
+                </table>
+            </div>
         </div>
 
         <!-- Footer -->

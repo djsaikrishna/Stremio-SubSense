@@ -17,6 +17,40 @@ const CHART_COLORS = [
 ];
 
 /**
+ * Re-check truncation after content update
+ * Adds click-to-expand and hover tooltip for truncated cells
+ * @param {HTMLElement} container - The container element to check within
+ */
+function refreshTruncatedCells(container = document) {
+    const cells = container.querySelectorAll('.data-table td');
+    cells.forEach(cell => {
+        // Skip cells with buttons or special content
+        if (cell.querySelector('button, code')) return;
+        
+        // Remove previous state
+        cell.classList.remove('truncated', 'expanded');
+        cell.removeAttribute('data-fulltext');
+        
+        // Re-check if truncated
+        if (cell.scrollWidth > cell.clientWidth) {
+            const fullText = cell.textContent.trim();
+            cell.classList.add('truncated');
+            cell.setAttribute('data-fulltext', fullText);
+            cell.setAttribute('title', fullText); // Add native tooltip for hover
+            
+            // Add click handler if not already present
+            if (!cell.hasAttribute('data-click-handler')) {
+                cell.setAttribute('data-click-handler', 'true');
+                cell.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    this.classList.toggle('expanded');
+                });
+            }
+        }
+    });
+}
+
+/**
  * Initialize the dashboard
  */
 document.addEventListener('DOMContentLoaded', () => {
@@ -135,6 +169,7 @@ function initCharts() {
  */
 async function loadStats() {
     try {
+        // Load main stats
         const response = await fetch('/stats/json');
         const stats = await response.json();
         
@@ -144,6 +179,15 @@ async function loadStats() {
         updateDailyTable(stats);
         updateErrorsTable(stats);
         updateLastUpdated();
+        
+        // Load cache stats (Phase 2.5)
+        loadCacheStats();
+        
+        // Load provider stats (Phase 2.5)
+        loadProviderStats();
+        
+        // Initialize truncated cell expand functionality
+        setTimeout(() => refreshTruncatedCells(), 100);
         
     } catch (error) {
         console.error('Failed to load stats:', error);
@@ -169,9 +213,8 @@ function updateLanguageMatching(stats) {
     const lm = stats.languageMatching || {};
     
     document.getElementById('primarySuccessRate').textContent = `${lm.primarySuccessRate || 0}%`;
-    document.getElementById('secondarySuccessRate').textContent = `${lm.secondarySuccessRate || 0}%`;
     document.getElementById('primaryFound').textContent = (lm.primaryFound || 0).toLocaleString();
-    document.getElementById('primaryNotFound').textContent = (lm.primaryNotFound || 0).toLocaleString();
+    document.getElementById('combinedSuccessRate').textContent = `${lm.preferredSuccessRate || 0}%`;
     
     // Top successful languages
     const topLangsContainer = document.getElementById('topLanguages');
@@ -315,9 +358,17 @@ function formatDate(dateStr) {
     const today = new Date();
     const yesterday = new Date(today);
     yesterday.setDate(yesterday.getDate() - 1);
+    
+    // Use local date for comparison (YYYY-MM-DD)
+    const getLocalDateStr = (d) => {
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    };
 
-    if (dateStr === today.toISOString().split('T')[0]) return 'Today';
-    if (dateStr === yesterday.toISOString().split('T')[0]) return 'Yesterday';
+    if (dateStr === getLocalDateStr(today)) return 'Today';
+    if (dateStr === getLocalDateStr(yesterday)) return 'Yesterday';
     
     return date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
 }
@@ -336,4 +387,95 @@ function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+// =====================================================
+// Cache Stats (Phase 2.5)
+// =====================================================
+
+/**
+ * Load and display cache statistics
+ */
+async function loadCacheStats() {
+    try {
+        const response = await fetch('/api/stats/cache');
+        
+        if (!response.ok) {
+            console.log('Cache stats not available');
+            return;
+        }
+        
+        const cache = await response.json();
+        
+        // Update cache stat cards
+        const hitRateEl = document.getElementById('cacheHitRate');
+        const entriesEl = document.getElementById('cacheEntries');
+        const contentEl = document.getElementById('cacheContent');
+        const languagesEl = document.getElementById('cacheLanguages');
+        const sizeEl = document.getElementById('cacheSize');
+        const hitBarEl = document.getElementById('cacheHitBar');
+        const hitsEl = document.getElementById('cacheHits');
+        const missesEl = document.getElementById('cacheMisses');
+        
+        if (hitRateEl) hitRateEl.textContent = `${cache.hitRate}%`;
+        if (entriesEl) entriesEl.textContent = cache.entries.toLocaleString();
+        if (contentEl) contentEl.textContent = cache.uniqueContent.toLocaleString();
+        if (languagesEl) languagesEl.textContent = cache.uniqueLanguages;
+        if (sizeEl) sizeEl.textContent = `${cache.sizeMB} MB`;
+        if (hitBarEl) hitBarEl.style.width = `${cache.hitRate}%`;
+        if (hitsEl) hitsEl.textContent = cache.hits.toLocaleString();
+        if (missesEl) missesEl.textContent = cache.misses.toLocaleString();
+        
+    } catch (error) {
+        console.error('Failed to load cache stats:', error);
+    }
+}
+
+// =====================================================
+// Provider Stats (Phase 2.5)
+// =====================================================
+
+/**
+ * Load and display provider statistics
+ */
+async function loadProviderStats() {
+    try {
+        const response = await fetch('/api/stats/providers');
+        
+        if (!response.ok) {
+            console.log('Provider stats not available');
+            return;
+        }
+        
+        const providers = await response.json();
+        const tbody = document.getElementById('providerTableBody');
+        
+        if (!tbody) return;
+        
+        if (providers.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: var(--color-text-secondary);">No provider data yet</td></tr>';
+            return;
+        }
+        
+        tbody.innerHTML = providers.map(p => {
+            // Determine status color based on success rate
+            let status = '🟢';
+            if (p.success_rate < 50) status = '🔴';
+            else if (p.success_rate < 80) status = '🟡';
+            
+            return `
+                <tr>
+                    <td>${escapeHtml(p.provider_name)}</td>
+                    <td>${status}</td>
+                    <td>${p.total_requests.toLocaleString()}</td>
+                    <td>${p.success_rate}%</td>
+                    <td>${p.avg_response_ms}ms</td>
+                    <td>${p.subtitles_returned.toLocaleString()}</td>
+                </tr>
+            `;
+        }).join('');
+        
+    } catch (error) {
+        console.error('Failed to load provider stats:', error);
+    }
 }

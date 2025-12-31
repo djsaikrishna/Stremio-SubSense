@@ -58,6 +58,160 @@ app.get('/api/version', (req, res) => {
     res.json({ version: packageJson.version });
 });
 
+// =====================================================
+// Stats API Endpoints (Phase 2.5)
+// =====================================================
+
+// Load cache modules for stats endpoints
+let statsDB = null;
+try {
+    const cache = require('./src/cache');
+    statsDB = cache.statsDB;
+} catch (error) {
+    log('warn', `Stats API: cache module not available: ${error.message}`);
+}
+
+// Load validators
+const validators = require('./src/utils/validators');
+
+/**
+ * Cache statistics API
+ * Returns: cache entries, hit rate, size, etc.
+ */
+app.get('/api/stats/cache', (req, res) => {
+    try {
+        if (!statsDB) {
+            return res.status(503).json({ error: 'Cache system not available' });
+        }
+        const cacheStats = statsDB.getCacheStats();
+        res.json(cacheStats);
+    } catch (error) {
+        log('error', `API /stats/cache error: ${error.message}`);
+        res.status(500).json({ error: 'Failed to get cache stats' });
+    }
+});
+
+/**
+ * Provider statistics API
+ * Returns: per-provider performance metrics
+ */
+app.get('/api/stats/providers', (req, res) => {
+    try {
+        if (!statsDB) {
+            return res.status(503).json({ error: 'Cache system not available' });
+        }
+        const days = Math.min(90, Math.max(1, parseInt(req.query.days, 10) || 7));
+        const providerStats = statsDB.getProviderStats(days);
+        res.json(providerStats);
+    } catch (error) {
+        log('error', `API /stats/providers error: ${error.message}`);
+        res.status(500).json({ error: 'Failed to get provider stats' });
+    }
+});
+
+/**
+ * Language statistics API
+ * Returns: per-language availability metrics
+ */
+app.get('/api/stats/languages', (req, res) => {
+    try {
+        if (!statsDB) {
+            return res.status(503).json({ error: 'Cache system not available' });
+        }
+        const days = Math.min(90, Math.max(1, parseInt(req.query.days, 10) || 7));
+        const languageStats = statsDB.getLanguageStats(days);
+        res.json(languageStats);
+    } catch (error) {
+        log('error', `API /stats/languages error: ${error.message}`);
+        res.status(500).json({ error: 'Failed to get language stats' });
+    }
+});
+
+/**
+ * Daily statistics API
+ * Returns: daily aggregated stats
+ */
+app.get('/api/stats/daily', (req, res) => {
+    try {
+        if (!statsDB) {
+            return res.status(503).json({ error: 'Cache system not available' });
+        }
+        const days = Math.min(90, Math.max(1, parseInt(req.query.days, 10) || 7));
+        const dailyStats = statsDB.getDailyStats(days);
+        res.json(dailyStats);
+    } catch (error) {
+        log('error', `API /stats/daily error: ${error.message}`);
+        res.status(500).json({ error: 'Failed to get daily stats' });
+    }
+});
+
+// =====================================================
+// Content Cache Browser Endpoints (Phase 2.5)
+// =====================================================
+
+/**
+ * Search cache by IMDB ID
+ * @param imdb - IMDB ID (validated: tt followed by 7-8 digits)
+ */
+app.get('/api/cache/search', (req, res) => {
+    try {
+        if (!statsDB) {
+            return res.status(503).json({ error: 'Cache system not available' });
+        }
+        
+        // Validate IMDB ID
+        const validation = validators.validateImdbId(req.query.imdb);
+        if (!validation.valid) {
+            return res.status(400).json({ error: validation.error });
+        }
+        
+        const result = statsDB.searchCacheByImdb(validation.value);
+        
+        if (!result) {
+            return res.status(404).json({ 
+                error: 'Content not found in cache',
+                imdbId: validation.value 
+            });
+        }
+        
+        res.json(result);
+    } catch (error) {
+        log('error', `API /cache/search error: ${error.message}`);
+        res.status(500).json({ error: 'Failed to search cache' });
+    }
+});
+
+/**
+ * List cached content (paginated)
+ * @param page - Page number (default: 1)
+ * @param limit - Items per page (max: 100, default: 20)
+ */
+app.get('/api/cache/list', (req, res) => {
+    try {
+        if (!statsDB) {
+            return res.status(503).json({ error: 'Cache system not available' });
+        }
+        
+        const pagination = validators.validatePagination({
+            page: req.query.page,
+            limit: req.query.limit
+        });
+        
+        const result = statsDB.getContentCacheSummary(pagination);
+        res.json(result);
+    } catch (error) {
+        log('error', `API /cache/list error: ${error.message}`);
+        res.status(500).json({ error: 'Failed to list cache' });
+    }
+});
+
+/**
+ * Content browser page
+ */
+app.get('/stats/content', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'content.html'));
+});
+
 /**
  * Custom manifest route with dynamic description based on config
  * This must be BEFORE the SDK router to intercept manifest requests

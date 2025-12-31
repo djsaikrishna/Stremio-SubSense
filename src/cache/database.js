@@ -81,6 +81,57 @@ CREATE TABLE IF NOT EXISTS request_log (
 
 CREATE INDEX IF NOT EXISTS idx_request_log_created 
 ON request_log(created_at);
+
+-- Provider performance tracking (NEW - Phase 2.5)
+CREATE TABLE IF NOT EXISTS provider_stats (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    provider_name TEXT NOT NULL,
+    date TEXT NOT NULL,
+    total_requests INTEGER DEFAULT 0,
+    successful_requests INTEGER DEFAULT 0,
+    failed_requests INTEGER DEFAULT 0,
+    avg_response_ms INTEGER DEFAULT 0,
+    subtitles_returned INTEGER DEFAULT 0,
+    UNIQUE(provider_name, date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_provider_stats_date 
+ON provider_stats(date);
+
+-- Language analytics (NEW - Phase 2.5)
+-- Updated: Added priority column to distinguish primary vs secondary language requests
+CREATE TABLE IF NOT EXISTS language_stats (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    language_code TEXT NOT NULL,
+    date TEXT NOT NULL,
+    priority TEXT DEFAULT 'primary', -- 'primary' or 'secondary'
+    requests_for INTEGER DEFAULT 0,
+    found_count INTEGER DEFAULT 0,
+    not_found_count INTEGER DEFAULT 0,
+    UNIQUE(language_code, date, priority)
+);
+
+CREATE INDEX IF NOT EXISTS idx_language_stats_date 
+ON language_stats(date);
+
+CREATE INDEX IF NOT EXISTS idx_language_stats_priority 
+ON language_stats(priority);
+
+-- Content cache summary view (NEW - Phase 2.5)
+-- For browsing cached content by IMDB ID
+CREATE VIEW IF NOT EXISTS content_cache_summary AS
+SELECT 
+    imdb_id,
+    season,
+    episode,
+    COUNT(DISTINCT language) as languages_cached,
+    COUNT(*) as total_subtitles,
+    MAX(updated_at) as last_updated,
+    GROUP_CONCAT(DISTINCT source) as sources,
+    GROUP_CONCAT(DISTINCT language) as language_list
+FROM subtitle_cache
+GROUP BY imdb_id, season, episode
+ORDER BY last_updated DESC;
 `;
 
 db.exec(schema);

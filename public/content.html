@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SubSense - Cache Browser</title>
+    <link rel="icon" type="image/png" sizes="32x32" href="/logo.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/logo.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/logo.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+    <div class="container wide">
+        <!-- Header -->
+        <header class="header">
+            <div class="logo-container">
+                <img src="/logo.png" alt="SubSense" class="logo-img">
+                <h1 class="title">SubSense</h1>
+            </div>
+            <span class="version" id="versionBadge">Loading...</span>
+            <p class="tagline">Browse cached subtitle data by content</p>
+            <nav class="nav-links">
+                <a href="/configure">Configure</a>
+                <a href="/stats">Stats</a>
+                <a href="/stats/content" class="active">Cache Browser</a>
+            </nav>
+        </header>
+
+        <!-- Search Section -->
+        <div class="card">
+            <h2>🔍 Search by IMDB ID</h2>
+            <div class="search-container">
+                <input type="text" id="imdbSearch" class="search-input" placeholder="Enter IMDB ID (e.g., tt0111161)" maxlength="10">
+                <button id="searchBtn" class="search-btn">
+                    <svg viewBox="0 0 24 24">
+                        <path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
+                    </svg>
+                    Search
+                </button>
+            </div>
+            <p id="searchHint" class="hint-text">Enter a valid IMDB ID starting with 'tt' followed by 7-8 digits</p>
+        </div>
+
+        <!-- Search Result -->
+        <div class="card" id="resultCard" style="display: none;">
+            <h2 id="resultTitle">📽️ Content Details</h2>
+            
+            <!-- Summary Stats -->
+            <div class="stats-grid" style="grid-template-columns: repeat(4, 1fr);">
+                <div class="stat-card">
+                    <div class="value" id="resultTotalSubs">0</div>
+                    <div class="label">Total Subtitles</div>
+                </div>
+                <div class="stat-card">
+                    <div class="value" id="resultLanguages">0</div>
+                    <div class="label">Languages</div>
+                </div>
+                <div class="stat-card">
+                    <div class="value" id="resultSources">0</div>
+                    <div class="label">Sources</div>
+                </div>
+                <div class="stat-card">
+                    <div class="value" id="resultAge">-</div>
+                    <div class="label">Last Updated</div>
+                </div>
+            </div>
+
+            <!-- Sources List -->
+            <div style="margin-top: 20px;">
+                <h4>Available Sources</h4>
+                <div id="sourcesList" style="display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px;">
+                    <!-- Populated by JS -->
+                </div>
+            </div>
+
+            <!-- Language Breakdown Table -->
+            <div style="margin-top: 24px;">
+                <h4>Subtitles by Language</h4>
+                <div class="table-responsive">
+                    <table class="data-table" id="breakdownTable">
+                        <thead>
+                            <tr>
+                                <th>Language</th>
+                                <th>Subtitles</th>
+                                <th>Sources</th>
+                                <th>Last Updated</th>
+                            </tr>
+                        </thead>
+                        <tbody id="breakdownTableBody">
+                            <!-- Populated by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Series Breakdown (if applicable) -->
+            <div id="seriesBreakdown" style="margin-top: 24px; display: none;">
+                <h4>Episode Breakdown</h4>
+                <div class="table-responsive">
+                    <table class="data-table" id="episodeTable">
+                        <thead>
+                            <tr>
+                                <th>Season</th>
+                                <th>Episode</th>
+                                <th>Languages</th>
+                                <th>Subtitles</th>
+                            </tr>
+                        </thead>
+                        <tbody id="episodeTableBody">
+                            <!-- Populated by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Not Found Card -->
+        <div class="card" id="notFoundCard" style="display: none; text-align: center;">
+            <h2>🔍 Content Not Found</h2>
+            <p id="notFoundMessage" style="color: var(--color-text-secondary); margin-top: 12px;"></p>
+            <p style="margin-top: 16px; font-size: 0.9rem; color: var(--color-text-muted);">
+                This content hasn't been requested yet, or its cache has expired.
+            </p>
+        </div>
+
+        <!-- Recent Content List -->
+        <div class="card">
+            <h2>📚 Recently Cached Content</h2>
+            <p style="color: var(--color-text-secondary); margin-bottom: 16px;">Latest content added to the cache</p>
+            
+            <div class="table-responsive">
+                <table class="data-table" id="recentTable">
+                    <thead>
+                        <tr>
+                            <th>IMDB ID</th>
+                            <th>Type</th>
+                            <th>Languages</th>
+                            <th>Subtitles</th>
+                            <th>Sources</th>
+                            <th>Last Updated</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="recentTableBody">
+                        <tr><td colspan="7" style="text-align: center; color: var(--color-text-secondary);">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            
+            <!-- Pagination -->
+            <div class="pagination" id="pagination" style="display: none;">
+                <button id="prevPage" class="page-btn" disabled>← Previous</button>
+                <span id="pageInfo" class="page-info">Page 1</span>
+                <button id="nextPage" class="page-btn">Next →</button>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <p>SubSense <span id="footerVersion">...</span> | <a href="/stats">Back to Stats</a></p>
+        </footer>
+    </div>
+
+    <script src="/js/content.js"></script>
+</body>
+</html>

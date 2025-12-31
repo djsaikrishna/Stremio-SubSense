@@ -24,6 +24,33 @@
     box-sizing: border-box;
 }
 
+/* ===== Modern Scrollbar Styling ===== */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: rgba(26, 34, 63, 0.5);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+    background: linear-gradient(180deg, var(--color-accent-blue) 0%, rgba(74, 144, 226, 0.6) 100%);
+    border-radius: 4px;
+    transition: background 0.2s ease;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: linear-gradient(180deg, #5B9FE8 0%, var(--color-accent-blue) 100%);
+}
+
+/* Firefox scrollbar */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-accent-blue) rgba(26, 34, 63, 0.5);
+}
+
 /* ===== Body & Container ===== */
 body {
     font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
@@ -242,7 +269,17 @@ body::before {
     backdrop-filter: blur(10px);
     position: relative;
     transition: var(--transition);
-    z-index: 10;
+    z-index: 1;
+}
+
+/* Configuration card needs higher z-index for dropdown overlays */
+.card:first-of-type {
+    z-index: 100;
+}
+
+/* When dropdown is active, ensure parent card is above siblings */
+.card:has(.dropdown-content.show) {
+    z-index: 200;
 }
 
 .card::before {
@@ -883,9 +920,16 @@ label {
 }
 
 /* ===== Data Tables ===== */
+.table-responsive {
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
 .data-table {
     width: 100%;
     border-collapse: collapse;
+    min-width: 600px; /* Minimum width before horizontal scroll kicks in */
 }
 
 .data-table th,
@@ -893,6 +937,10 @@ label {
     padding: 14px 16px;
     text-align: left;
     border-bottom: 1px solid var(--color-border);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 200px;
 }
 
 .data-table th {
@@ -913,6 +961,57 @@ label {
 
 .data-table td {
     color: var(--color-text-primary);
+    position: relative;
+}
+
+/* Expandable cell - click to show full content */
+.data-table td.truncated {
+    cursor: pointer;
+}
+
+.data-table td.truncated::after {
+    content: '...';
+    color: var(--color-accent-blue);
+    font-weight: bold;
+    padding-left: 2px;
+}
+
+.data-table td.truncated:hover {
+    background: rgba(74, 144, 226, 0.1);
+}
+
+.data-table td.truncated.expanded {
+    white-space: normal;
+    max-width: none;
+    word-break: break-word;
+    background: rgba(74, 144, 226, 0.15);
+}
+
+.data-table td.truncated.expanded::after {
+    content: none;
+}
+
+/* Responsive table adjustments */
+@media (max-width: 768px) {
+    .data-table {
+        min-width: 500px;
+    }
+    
+    .data-table th,
+    .data-table td {
+        padding: 10px 12px;
+        font-size: 0.85rem;
+        max-width: 150px;
+    }
+}
+
+@media (max-width: 480px) {
+    .data-table th,
+    .data-table td {
+        padding: 8px 10px;
+        font-size: 0.8rem;
+        max-width: 120px;
+    }
 }
 
 /* ===== Toggle Switch ===== */
@@ -1094,4 +1193,172 @@ label {
     .stat-card .value {
         font-size: 1.4rem;
     }
+}
+
+/* ===== Content Browser Styles (Phase 2.5) ===== */
+
+/* Search Container */
+.search-container {
+    display: flex;
+    gap: 12px;
+    margin-top: 16px;
+}
+
+.search-input {
+    flex: 1;
+    padding: 14px 18px;
+    font-size: 1rem;
+    font-family: 'Monaco', 'Consolas', monospace;
+    background: var(--color-light-blue-bg);
+    border: 2px solid var(--color-border);
+    border-radius: 12px;
+    color: var(--color-text-primary);
+    transition: var(--transition);
+    text-transform: lowercase;
+}
+
+.search-input:focus {
+    outline: none;
+    border-color: var(--color-accent-blue);
+    box-shadow: 0 0 0 3px rgba(74, 144, 226, 0.2);
+}
+
+.search-input::placeholder {
+    color: var(--color-text-secondary);
+    opacity: 0.7;
+}
+
+/* Search Button - Modern Style */
+.search-btn {
+    padding: 14px 28px;
+    font-size: 1rem;
+    font-weight: 600;
+    background: linear-gradient(135deg, var(--color-accent-blue) 0%, #3578C0 100%);
+    border: none;
+    border-radius: 12px;
+    color: white;
+    cursor: pointer;
+    transition: var(--transition);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    white-space: nowrap;
+    box-shadow: 0 4px 15px rgba(74, 144, 226, 0.3);
+}
+
+.search-btn:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(74, 144, 226, 0.4);
+    background: linear-gradient(135deg, #5A9FE8 0%, #4A90E2 100%);
+}
+
+.search-btn:active:not(:disabled) {
+    transform: translateY(0);
+}
+
+.search-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.search-btn svg {
+    width: 18px;
+    height: 18px;
+    fill: currentColor;
+}
+
+.hint-text {
+    margin-top: 10px;
+    font-size: 0.9rem;
+    color: var(--color-text-muted);
+}
+
+/* Pagination */
+.pagination {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 16px;
+    margin-top: 24px;
+    padding-top: 16px;
+    border-top: 1px solid var(--color-border);
+}
+
+.page-btn {
+    padding: 10px 20px;
+    font-size: 0.9rem;
+    font-weight: 500;
+    background: var(--color-light-blue-bg);
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    color: var(--color-text-primary);
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+.page-btn:hover:not(:disabled) {
+    background: var(--color-accent-blue);
+    border-color: var(--color-accent-blue);
+}
+
+.page-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.page-info {
+    color: var(--color-text-secondary);
+    font-size: 0.9rem;
+}
+
+/* View Button in Tables */
+.view-btn {
+    padding: 6px 14px;
+    font-size: 0.85rem;
+    font-weight: 500;
+    background: transparent;
+    border: 1px solid var(--color-accent-blue);
+    border-radius: 6px;
+    color: var(--color-accent-blue);
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+.view-btn:hover {
+    background: var(--color-accent-blue);
+    color: white;
+}
+
+/* Code style for IMDB IDs */
+code {
+    font-family: 'Monaco', 'Consolas', monospace;
+    background: rgba(74, 144, 226, 0.15);
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.9rem;
+}
+
+/* ===== Provider Status Indicators ===== */
+.status-indicator {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    margin-right: 6px;
+}
+
+.status-green {
+    background: #2ECC71;
+    box-shadow: 0 0 6px rgba(46, 204, 113, 0.5);
+}
+
+.status-yellow {
+    background: #F39C12;
+    box-shadow: 0 0 6px rgba(243, 156, 18, 0.5);
+}
+
+.status-red {
+    background: #E74C3C;
+    box-shadow: 0 0 6px rgba(231, 76, 60, 0.5);
 }

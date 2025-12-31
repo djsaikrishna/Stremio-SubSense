@@ -21,7 +21,7 @@ const { BaseProvider, SubtitleResult } = require('./BaseProvider');
 const { log } = require('../utils');
 
 // Default sources if not configured (includes gestdown)
-const DEFAULT_SOURCES = ['opensubtitles', 'subdl', 'subf2m', 'podnapisi', 'animetosho', 'gestdown'];
+const DEFAULT_SOURCES = ['OpenSubtitles', 'Subdl', 'Subf2m', 'Podnapisi', 'AnimeTosho', 'Gestdown'];
 
 // Fast-first configuration (can be made configurable later)
 const FAST_FIRST_CONFIG = {

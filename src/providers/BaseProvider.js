@@ -98,6 +98,39 @@ class BaseProvider {
             this.stats.failedRequests++;
             this.stats.lastError = error ? error.message : 'Unknown error';
         }
+        
+        // Also record to database (Phase 2.5)
+        this._recordToDatabase(success, fetchTimeMs, subtitleCount);
+    }
+    
+    /**
+     * Record provider stats to database
+     * @private
+     */
+    _recordToDatabase(success, responseMs, subtitlesCount) {
+        try {
+            // Lazy-load statsDB to avoid circular dependencies
+            if (!this._statsDB) {
+                try {
+                    const cache = require('../cache');
+                    this._statsDB = cache.statsDB;
+                } catch (e) {
+                    // Cache not available, skip DB recording
+                    return;
+                }
+            }
+            
+            if (this._statsDB && this._statsDB.recordProviderStats) {
+                this._statsDB.recordProviderStats({
+                    providerName: this.name,
+                    success,
+                    responseMs,
+                    subtitlesCount
+                });
+            }
+        } catch (error) {
+            // Silently fail - don't break functionality for stats
+        }
     }
 
     /**

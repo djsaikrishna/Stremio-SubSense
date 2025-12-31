@@ -124,6 +124,45 @@ async function handleSubtitles(args, config) {
             providerStats: providerManager.getStats()
         });
 
+        // Log detailed request to database (Phase 2.5)
+        if (statsDB) {
+            // Log request
+            statsDB.logRequest({
+                imdbId: parsed.imdbId,
+                contentType: parsed.type,
+                languages: [config.primaryLang, config.secondaryLang].filter(Boolean),
+                resultCount: formatted.length,
+                cacheHit,
+                responseTimeMs: fetchTimeMs
+            });
+            
+            // Record daily stats
+            statsDB.recordDaily({ requests: 1 });
+            
+            // Record language stats with priority distinction
+            if (config.primaryLang) {
+                statsDB.recordLanguageStats({
+                    languageCode: config.primaryLang,
+                    found: languageMatch?.primaryFound || false,
+                    priority: 'primary'
+                });
+            }
+            if (config.secondaryLang && config.secondaryLang !== 'none') {
+                statsDB.recordLanguageStats({
+                    languageCode: config.secondaryLang,
+                    found: languageMatch?.secondaryFound || false,
+                    priority: 'secondary'
+                });
+            }
+            
+            // Track "preferred found" rate - success if primary OR secondary was found
+            const preferredFound = (languageMatch?.primaryFound || false) || (languageMatch?.secondaryFound || false);
+            statsDB.increment('preferred_requests');
+            if (preferredFound) {
+                statsDB.increment('preferred_found');
+            }
+        }
+
         log('debug', `Returning ${formatted.length} subtitles in ${fetchTimeMs}ms`);
 
         // Fire-and-forget: handle background fetch completion to cache ALL languages
