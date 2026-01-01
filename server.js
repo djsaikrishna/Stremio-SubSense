@@ -234,7 +234,9 @@ app.get('/:config/manifest.json', (req, res) => {
     const manifest = generateManifest(config);
     
     // Remove configurationRequired after config is provided (so addon is installable)
-    if (config.primaryLang) {
+    // Check for new format (languages array) or legacy format (primaryLang)
+    const hasValidConfig = (config.languages && config.languages.length > 0) || config.primaryLang;
+    if (hasValidConfig) {
         delete manifest.behaviorHints.configurationRequired;
     }
     
@@ -301,6 +303,55 @@ app.get('/api/subtitle/:format/*', async (req, res) => {
     } catch (error) {
         log('error', `Subtitle proxy error: ${error.message}`);
         res.status(500).send(`Subtitle proxy error: ${error.message}`);
+    }
+});
+
+// Import handleSubtitles for custom subtitles route
+const { handleSubtitles } = require('./src/subtitles');
+const { parseConfig } = require('./src/config');
+
+/**
+ * Custom subtitles route to handle JSON config format
+ * Stremio SDK doesn't parse JSON configs, so we handle it ourselves
+ * URL format: /{config}/subtitles/{type}/{id}.json
+ */
+app.get('/:config/subtitles/:type/:id.json', async (req, res) => {
+    const { config: configParam, type, id } = req.params;
+    
+    log('debug', `Subtitle request: config=${configParam}, type=${type}, id=${id}`);
+    
+    try {
+        // Parse JSON config from URL
+        let config = {};
+        try {
+            config = JSON.parse(decodeURIComponent(configParam));
+        } catch (e) {
+            log('warn', `Failed to parse config: ${configParam}`);
+            return res.status(400).json({ subtitles: [], error: 'Invalid config format' });
+        }
+        
+        // Validate config
+        const validatedConfig = parseConfig(config);
+        
+        // Build args object like Stremio SDK does
+        const args = {
+            type,
+            id,
+            config: validatedConfig
+        };
+        
+        // Handle the subtitle request
+        const result = await handleSubtitles(args, validatedConfig);
+        
+        log('debug', `Returning ${result.subtitles.length} subtitles`);
+        
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.json(result);
+        
+    } catch (error) {
+        log('error', `Subtitle handler error: ${error.message}`);
+        res.status(500).json({ subtitles: [], error: error.message });
     }
 });
 

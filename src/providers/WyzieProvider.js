@@ -272,6 +272,240 @@ class WyzieProvider extends BaseProvider {
     }
 
     /**
+     * Multi-Language Fast-First Parallel Search Strategy
+     * 
+     * Queries all sources in parallel for EACH language (N languages × M sources).
+     * Returns when any language hits the threshold. All selected languages are
+     * treated with equal priority (no primary/secondary distinction).
+     * 
+     * @param {Object} query - Search query
+     * @param {Array<string>} languages - Array of language codes (2-letter ISO 639-1), max 5
+     * @returns {Promise<{subtitles: Array<SubtitleResult>, fromCache: boolean, backgroundPromise: Promise}>}
+     */
+    async searchFastFirstMulti(query, languages = []) {
+        if (!this.enabled || languages.length === 0) {
+            return { subtitles: [], fromCache: false, backgroundPromise: null };
+        }
+
+        // Check cache first for all languages
+        const cacheKey = this._getCacheKey(query);
+        const cached = this._backgroundCache.get(cacheKey);
+        if (cached && cached.subtitles) {
+            log('debug', `[WyzieProvider] Returning ${cached.subtitles.length} cached subtitles for ${languages.length} languages`);
+            const filtered = this._filterByLanguages(cached.subtitles, languages);
+            return { subtitles: filtered, fromCache: true, backgroundPromise: null };
+        }
+
+        const startTime = Date.now();
+        
+        // State for tracking collected subtitles across all languages
+        const state = {
+            allSubtitles: [],
+            byLanguage: {},  // { 'en': [...], 'fr': [...], ... }
+            sourcesCompleted: 0,
+            totalSources: this.sources.length * languages.length,
+            resolved: false,
+            seenUrls: new Set()
+        };
+        
+        // Initialize language buckets
+        languages.forEach(lang => {
+            state.byLanguage[lang.toLowerCase()] = [];
+        });
+
+        // Create parallel promises for each language × each source
+        const allLanguagePromises = [];
+        
+        for (const lang of languages) {
+            const langPromises = this.sources.map(source => 
+                this._searchSource(query, source, lang)
+                    .then(subs => {
+                        this._handleMultiLanguageResult(state, subs, lang);
+                        return subs;
+                    })
+                    .catch(err => {
+                        log('debug', `[WyzieProvider] Source ${source} for ${lang} failed: ${err.message}`);
+                        state.sourcesCompleted++;
+                        return [];
+                    })
+            );
+            allLanguagePromises.push(...langPromises);
+        }
+        
+        // Background promises WITHOUT language filter (for full caching)
+        const backgroundState = {
+            allSubtitles: [],
+            seenUrls: new Set(),
+            languagesFound: new Set()
+        };
+        
+        const backgroundSourcePromises = this.sources.map(source => 
+            this._searchSource(query, source, null)
+                .then(subs => {
+                    for (const sub of subs) {
+                        if (!backgroundState.seenUrls.has(sub.url)) {
+                            backgroundState.seenUrls.add(sub.url);
+                            backgroundState.allSubtitles.push(sub);
+                            if (sub.language) {
+                                backgroundState.languagesFound.add(sub.language);
+                            }
+                        }
+                    }
+                    return subs;
+                })
+                .catch(err => {
+                    log('debug', `[WyzieProvider] Background source ${source} failed: ${err.message}`);
+                    return [];
+                })
+        );
+
+        // Fast-first promise: resolves when ALL languages have at least some results or any has hit threshold
+        const fastResultPromise = new Promise((resolve) => {
+            const checkThreshold = () => {
+                if (!state.resolved) {
+                    // Check if ALL preferred languages have at least 1 subtitle each
+                    let allLanguagesHaveResults = true;
+                    let anyLanguageHitThreshold = false;
+                    let totalFromPreferred = 0;
+                    
+                    for (const lang of languages) {
+                        const langKey = lang.toLowerCase();
+                        const count = state.byLanguage[langKey]?.length || 0;
+                        totalFromPreferred += count;
+                        
+                        if (count === 0) {
+                            allLanguagesHaveResults = false;
+                        }
+                        if (count >= this.minSubtitles) {
+                            anyLanguageHitThreshold = true;
+                        }
+                    }
+                    
+                    // Resolve if ALL languages have at least 1 result and total is good enough
+                    // OR if any single language hit the threshold and we've waited a bit for others
+                    if (allLanguagesHaveResults && totalFromPreferred >= this.minSubtitles) {
+                        state.resolved = true;
+                        const fetchTimeMs = Date.now() - startTime;
+                        const langCounts = languages.map(l => `${l}:${(state.byLanguage[l.toLowerCase()] || []).length}`).join(', ');
+                        log('info', `[WyzieProvider] Multi-lang fast-first: all languages have results (${langCounts}) in ${fetchTimeMs}ms`);
+                        resolve(state.allSubtitles);
+                        return;
+                    }
+                    
+                    // If one language hit threshold and we've been waiting for 3000ms+, resolve anyway
+                    if (anyLanguageHitThreshold && (Date.now() - startTime) >= 3000) {
+                        state.resolved = true;
+                        const fetchTimeMs = Date.now() - startTime;
+                        const langCounts = languages.map(l => `${l}:${(state.byLanguage[l.toLowerCase()] || []).length}`).join(', ');
+                        log('info', `[WyzieProvider] Multi-lang fast-first: timeout with partial results (${langCounts}) in ${fetchTimeMs}ms`);
+                        resolve(state.allSubtitles);
+                        return;
+                    }
+                }
+            };
+
+            // Check periodically
+            const checkInterval = setInterval(() => {
+                checkThreshold();
+                if (state.resolved || state.sourcesCompleted >= state.totalSources) {
+                    clearInterval(checkInterval);
+                }
+            }, 50);
+
+            state.checkThreshold = checkThreshold;
+        });
+
+        // All language queries done promise
+        const allDonePromise = Promise.allSettled(allLanguagePromises).then(() => {
+            if (!state.resolved) {
+                state.resolved = true;
+                const fetchTimeMs = Date.now() - startTime;
+                const langCounts = languages.map(l => `${l}:${(state.byLanguage[l.toLowerCase()] || []).length}`).join(', ');
+                log('info', `[WyzieProvider] Multi-lang complete: ${state.allSubtitles.length} total subs in ${fetchTimeMs}ms (${langCounts})`);
+            }
+            return state.allSubtitles;
+        });
+
+        // Background promise for caching
+        const backgroundPromise = Promise.allSettled(backgroundSourcePromises).then(() => {
+            const fetchTimeMs = Date.now() - startTime;
+            const languagesList = [...backgroundState.languagesFound].sort().join(', ');
+            log('info', `[WyzieProvider] Background complete: ${backgroundState.allSubtitles.length} total subs (languages: ${languagesList || 'none'})`);
+            
+            this._backgroundCache.set(cacheKey, {
+                subtitles: backgroundState.allSubtitles,
+                languages: [...backgroundState.languagesFound],
+                timestamp: Date.now()
+            });
+            
+            this.updateStats(true, fetchTimeMs, backgroundState.allSubtitles.length);
+            
+            return backgroundState.allSubtitles;
+        });
+
+        // Wait for fast result or all language queries to complete
+        const raceResult = await Promise.race([
+            fastResultPromise,
+            allDonePromise
+        ]);
+
+        return {
+            subtitles: raceResult,
+            fromCache: false,
+            backgroundPromise: backgroundPromise
+        };
+    }
+
+    /**
+     * Handle results from a source for multi-language search
+     * @private
+     */
+    _handleMultiLanguageResult(state, subtitles, language) {
+        state.sourcesCompleted++;
+        const langKey = language.toLowerCase();
+        
+        for (const sub of subtitles) {
+            if (state.seenUrls.has(sub.url)) {
+                continue;
+            }
+            state.seenUrls.add(sub.url);
+            state.allSubtitles.push(sub);
+            
+            // Add to language bucket
+            const subLang = (sub.language || '').toLowerCase();
+            if (state.byLanguage[subLang]) {
+                state.byLanguage[subLang].push(sub);
+            }
+        }
+
+        if (state.checkThreshold) {
+            state.checkThreshold();
+        }
+    }
+
+    /**
+     * Filter cached subtitles by multiple languages (equal priority)
+     * @private
+     */
+    _filterByLanguages(subtitles, languages) {
+        const langSet = new Set(languages.map(l => l.toLowerCase()));
+        const selected = [];
+        const others = [];
+
+        for (const sub of subtitles) {
+            const subLang = (sub.language || '').toLowerCase();
+            if (langSet.has(subLang)) {
+                selected.push(sub);
+            } else {
+                others.push(sub);
+            }
+        }
+
+        // Return selected languages first, then others
+        return [...selected, ...others];
+    }
+
+    /**
      * Search a single source
      * @private
      */
@@ -296,7 +530,19 @@ class WyzieProvider extends BaseProvider {
             const subtitles = Array.isArray(results) ? results : [];
             return subtitles.map(sub => this._normalizeResult(sub));
         } catch (error) {
-            log('debug', `[WyzieProvider] Source ${source} error: ${error.message}`);
+            // Handle specific HTTP errors more gracefully
+            const errorMsg = error.message || '';
+            if (errorMsg.includes('status: 400') || errorMsg.includes('400')) {
+                log('debug', `[WyzieProvider] Source ${source}${language ? ` (${language})` : ''}: No subtitles found`);
+            } else if (errorMsg.includes('status: 404') || errorMsg.includes('404')) {
+                log('debug', `[WyzieProvider] Source ${source}${language ? ` (${language})` : ''}: Content not found`);
+            } else if (errorMsg.includes('status: 429') || errorMsg.includes('429')) {
+                log('warn', `[WyzieProvider] Source ${source}: Rate limited`);
+            } else if (errorMsg.includes('status: 5') || errorMsg.includes('500') || errorMsg.includes('502') || errorMsg.includes('503')) {
+                log('debug', `[WyzieProvider] Source ${source}: Server error`);
+            } else {
+                log('debug', `[WyzieProvider] Source ${source} error: ${error.message}`);
+            }
             return [];
         }
     }

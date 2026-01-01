@@ -63,12 +63,21 @@ function getLanguageName(code) {
 }
 
 /**
- * Validate if a language code is supported
+ * Validate if a language code is a valid ISO 639-2 code
+ * Accepts both B (bibliographic) and T (terminology) codes
  * @param {string} code - Language code to validate
  * @returns {boolean}
  */
 function isValidLanguage(code) {
-    return code === 'none' || COMMON_LANGUAGE_CODES.includes(code);
+    if (!code) return false;
+    if (code === 'none') return true;
+    
+    const lowerCode = code.toLowerCase();
+    
+    // Check if the code is a valid ISO 639-2 code (either B or T variant)
+    // The library can get a name from valid codes
+    const name = languages.getName(lowerCode, 'en');
+    return name !== undefined && name !== null;
 }
 
 /**

@@ -26,8 +26,9 @@ const USE_FAST_FIRST = true;
 
 /**
  * Handle subtitle request from Stremio
+ * Supports multi-language selection (up to 5 languages with equal priority)
  * @param {Object} args - Stremio request args (type, id, extra)
- * @param {Object} config - User configuration (primaryLang, secondaryLang)
+ * @param {Object} config - User configuration (languages array or legacy primaryLang/secondaryLang)
  * @returns {Object} Stremio subtitle response
  */
 async function handleSubtitles(args, config) {
@@ -39,45 +40,54 @@ async function handleSubtitles(args, config) {
         const parsed = parseStremioId(args.id);
         log('debug', `Parsed ID: imdb=${parsed.imdbId}, season=${parsed.season}, episode=${parsed.episode}`);
 
+        // Get languages from config (supports both new and legacy format)
+        const languages = config.languages || [];
+        if (languages.length === 0 && config.primaryLang) {
+            // Legacy fallback
+            languages.push(config.primaryLang);
+            if (config.secondaryLang && config.secondaryLang !== 'none') {
+                languages.push(config.secondaryLang);
+            }
+        }
+
         // Convert Stremio 3-letter codes to wyzie 2-letter
-        const primaryWyzie = mapStremioToWyzie(config.primaryLang);
-        const secondaryWyzie = config.secondaryLang !== 'none' ? mapStremioToWyzie(config.secondaryLang) : null;
+        const wyzieLanguages = languages.map(lang => mapStremioToWyzie(lang)).filter(Boolean);
 
         let rawSubtitles = [];
         let backgroundPromise = null;
 
-        // Check cache first (Phase 2) - check both primary and secondary
-        if (subtitleCache && primaryWyzie) {
-            const cachedPrimary = subtitleCache.get(parsed.imdbId, parsed.season, parsed.episode, primaryWyzie);
-            const cachedSecondary = secondaryWyzie 
-                ? subtitleCache.get(parsed.imdbId, parsed.season, parsed.episode, secondaryWyzie)
-                : null;
+        // Check cache first for all requested languages
+        if (subtitleCache && wyzieLanguages.length > 0) {
+            const cachedSubtitles = [];
+            let allCached = true;
+            let needsRefresh = false;
             
-            // Merge cached results from both languages
-            if (cachedPrimary && cachedPrimary.subtitles.length > 0) {
-                rawSubtitles = [...cachedPrimary.subtitles];
+            for (const lang of wyzieLanguages) {
+                const cached = subtitleCache.get(parsed.imdbId, parsed.season, parsed.episode, lang);
+                if (cached && cached.subtitles.length > 0) {
+                    cachedSubtitles.push(...cached.subtitles);
+                    if (cached.needsRefresh) {
+                        needsRefresh = true;
+                    }
+                } else {
+                    allCached = false;
+                }
+            }
+            
+            if (cachedSubtitles.length > 0) {
+                rawSubtitles = cachedSubtitles;
                 cacheHit = true;
-                log('info', `Cache HIT (primary): ${cachedPrimary.subtitles.length} subtitles for ${parsed.imdbId} (${primaryWyzie})`);
+                log('info', `Cache HIT: ${cachedSubtitles.length} subtitles for ${wyzieLanguages.join(', ')}`);
                 
-                if (cachedPrimary.needsRefresh) {
-                    log('debug', 'Primary cache stale, triggering background refresh');
-                    backgroundPromise = refreshCacheInBackground(parsed, primaryWyzie, secondaryWyzie);
+                if (needsRefresh) {
+                    log('debug', 'Cache stale, triggering background refresh');
+                    backgroundPromise = refreshCacheInBackground(parsed, wyzieLanguages);
                 }
-            }
-            
-            if (cachedSecondary && cachedSecondary.subtitles.length > 0) {
-                rawSubtitles = [...rawSubtitles, ...cachedSecondary.subtitles];
-                log('info', `Cache HIT (secondary): ${cachedSecondary.subtitles.length} subtitles for ${parsed.imdbId} (${secondaryWyzie})`);
                 
-                // If primary wasn't found but secondary was, still consider it a partial hit
-                if (!cacheHit) {
-                    cacheHit = true;
+                if (statsDB) {
+                    statsDB.increment('cache_hits');
+                    statsDB.recordDaily({ cacheHits: 1 });
                 }
-            }
-            
-            if (cacheHit && statsDB) {
-                statsDB.increment('cache_hits');
-                statsDB.recordDaily({ cacheHits: 1 });
             }
         }
 
@@ -89,31 +99,31 @@ async function handleSubtitles(args, config) {
             }
 
             if (USE_FAST_FIRST) {
-                // Fast-first strategy: parallel queries, return on threshold
-                const result = await fetchSubtitlesFastFirst(parsed, primaryWyzie, secondaryWyzie);
+                // Multi-language fast-first strategy
+                const result = await fetchSubtitlesFastFirstMulti(parsed, wyzieLanguages);
                 rawSubtitles = result.subtitles;
                 backgroundPromise = result.backgroundPromise;
-                log('info', `Fast-first: got ${rawSubtitles.length} subtitles${result.fromCache ? ' (cached)' : ''}`);
+                log('info', `Fast-first multi-lang: got ${rawSubtitles.length} subtitles`);
             } else {
                 // Legacy: fetch all at once
                 rawSubtitles = await fetchSubtitles(parsed);
                 log('debug', `Fetched ${rawSubtitles.length} raw subtitles from providers`);
             }
 
-            // Store in cache per language - cache ALL languages for any future user
+            // Store in cache per language
             if (subtitleCache && rawSubtitles.length > 0) {
                 cacheSubtitlesByLanguage(parsed, rawSubtitles);
             }
         }
 
-        // Prioritize by language (fast-first already filters, but this adds sorting)
-        const { subtitles: prioritized, languageMatch } = prioritizeSubtitles(rawSubtitles, config);
+        // Prioritize by user's selected languages (all with equal priority)
+        const { subtitles: prioritized, languageMatch } = prioritizeSubtitlesMulti(rawSubtitles, languages);
         log('debug', `After prioritization: ${prioritized.length} subtitles`);
 
         // Format for Stremio
         const formatted = formatForStremio(prioritized);
 
-        // Track stats (including provider stats)
+        // Track stats
         const fetchTimeMs = Date.now() - startTime;
         statsService.trackRequest({
             type: parsed.type,
@@ -126,46 +136,30 @@ async function handleSubtitles(args, config) {
 
         // Log detailed request to database (Phase 2.5)
         if (statsDB) {
-            // Log request
             statsDB.logRequest({
                 imdbId: parsed.imdbId,
                 contentType: parsed.type,
-                languages: [config.primaryLang, config.secondaryLang].filter(Boolean),
+                languages: languages,
                 resultCount: formatted.length,
                 cacheHit,
                 responseTimeMs: fetchTimeMs
             });
             
-            // Record daily stats
             statsDB.recordDaily({ requests: 1 });
             
-            // Record language stats with priority distinction
-            if (config.primaryLang) {
+            // Record language stats for each selected language
+            for (const lang of languages) {
+                const found = languageMatch?.byLanguage?.[lang]?.found || false;
                 statsDB.recordLanguageStats({
-                    languageCode: config.primaryLang,
-                    found: languageMatch?.primaryFound || false,
-                    priority: 'primary'
+                    languageCode: lang,
+                    found: found
                 });
-            }
-            if (config.secondaryLang && config.secondaryLang !== 'none') {
-                statsDB.recordLanguageStats({
-                    languageCode: config.secondaryLang,
-                    found: languageMatch?.secondaryFound || false,
-                    priority: 'secondary'
-                });
-            }
-            
-            // Track "preferred found" rate - success if primary OR secondary was found
-            const preferredFound = (languageMatch?.primaryFound || false) || (languageMatch?.secondaryFound || false);
-            statsDB.increment('preferred_requests');
-            if (preferredFound) {
-                statsDB.increment('preferred_found');
             }
         }
 
         log('debug', `Returning ${formatted.length} subtitles in ${fetchTimeMs}ms`);
 
-        // Fire-and-forget: handle background fetch completion to cache ALL languages
+        // Fire-and-forget: handle background fetch completion
         if (backgroundPromise && !cacheHit) {
             backgroundPromise
                 .then(backgroundSubtitles => {
@@ -186,30 +180,37 @@ async function handleSubtitles(args, config) {
 }
 
 /**
- * Fetch subtitles using fast-first parallel strategy
- * Queries all sources in parallel and returns as soon as threshold is met
+ * Fetch subtitles using multi-language fast-first parallel strategy
  * @param {Object} parsed - Parsed Stremio ID
- * @param {string} primaryLang - Primary language (2-letter code)
- * @param {string|null} secondaryLang - Secondary language for fallback
+ * @param {Array<string>} languages - Array of language codes (2-letter)
  * @returns {Object} { subtitles, fromCache, backgroundPromise }
  */
-async function fetchSubtitlesFastFirst(parsed, primaryLang, secondaryLang) {
+async function fetchSubtitlesFastFirstMulti(parsed, languages) {
     const query = {
         imdbId: parsed.imdbId,
         season: parsed.season,
         episode: parsed.episode
     };
 
-    // Get the Wyzie provider
     const wyzieProvider = providerManager.get('wyzie');
-    if (!wyzieProvider || !wyzieProvider.searchFastFirst) {
-        // Fallback to regular search if provider doesn't support fast-first
-        log('debug', 'Fast-first not available, using regular search');
+    if (!wyzieProvider) {
+        log('debug', 'Wyzie provider not available, using regular search');
         const subtitles = await providerManager.searchAll(query);
         return { subtitles, fromCache: false, backgroundPromise: null };
     }
 
-    return await wyzieProvider.searchFastFirst(query, primaryLang, secondaryLang);
+    // Use multi-language fast-first if available
+    if (wyzieProvider.searchFastFirstMulti) {
+        return await wyzieProvider.searchFastFirstMulti(query, languages);
+    }
+    
+    // Fallback to legacy fast-first with first two languages
+    if (wyzieProvider.searchFastFirst && languages.length > 0) {
+        return await wyzieProvider.searchFastFirst(query, languages[0], languages[1] || null);
+    }
+
+    const subtitles = await providerManager.searchAll(query);
+    return { subtitles, fromCache: false, backgroundPromise: null };
 }
 
 /**
@@ -232,83 +233,38 @@ async function fetchSubtitles(parsed) {
 }
 
 /**
- * Fetch subtitles by specific languages (potentially faster)
- * @param {Object} parsed - Parsed Stremio ID  
- * @param {Array<string>} languages - Language codes to filter
- * @returns {Array} Filtered subtitle objects
- */
-async function fetchSubtitlesByLanguages(parsed, languages) {
-    const query = {
-        imdbId: parsed.imdbId,
-        season: parsed.season,
-        episode: parsed.episode
-    };
-
-    return await providerManager.searchByLanguages(query, languages);
-}
-
-/**
- * Prioritize subtitles by user's language preferences
- * Order: Primary language first, then secondary, then others
+ * Prioritize subtitles by user's selected languages (all with equal priority)
+ * Interleaves subtitles across all selected languages to ensure balanced distribution
  * @param {Array} subtitles - Raw subtitles from providers
- * @param {Object} config - User config with primaryLang, secondaryLang
+ * @param {Array<string>} languages - User's selected languages (3-letter codes)
  * @returns {Object} { subtitles: Array, languageMatch: Object }
  */
-function prioritizeSubtitles(subtitles, config) {
-    const { primaryLang, secondaryLang } = config;
-    
+function prioritizeSubtitlesMulti(subtitles, languages) {
     // Convert Stremio 3-letter codes to wyzie 2-letter for comparison
-    const primaryWyzie = mapStremioToWyzie(primaryLang);
-    const secondaryWyzie = secondaryLang !== 'none' ? mapStremioToWyzie(secondaryLang) : null;
+    const wyzieLangs = languages.map(lang => ({
+        stremio: lang,
+        wyzie: mapStremioToWyzie(lang)?.toLowerCase()
+    })).filter(l => l.wyzie);
 
-    const primary = [];
-    const secondary = [];
+    // Group subtitles by language
+    const byLanguage = {};
+    for (const lang of languages) {
+        byLanguage[lang] = [];
+    }
     const others = [];
 
-    // Track sources for each language group
-    const primarySources = new Set();
-    const secondarySources = new Set();
-
     for (const sub of subtitles) {
-        const subLang = sub.lang || sub.language || '';
-        const normalizedLang = subLang.toLowerCase().substring(0, 2);
+        const subLang = (sub.lang || sub.language || '').toLowerCase().substring(0, 2);
         const source = Array.isArray(sub.source) ? sub.source[0] : (sub.source || 'unknown');
-
-        if (primaryWyzie && normalizedLang === primaryWyzie.toLowerCase()) {
-            primary.push(sub);
-            primarySources.add(source);
-        } else if (secondaryWyzie && normalizedLang === secondaryWyzie.toLowerCase()) {
-            secondary.push(sub);
-            secondarySources.add(source);
+        
+        // Check if this subtitle matches any selected language
+        const matchedLang = wyzieLangs.find(l => l.wyzie === subLang);
+        
+        if (matchedLang) {
+            byLanguage[matchedLang.stremio].push(sub);
         } else {
             others.push(sub);
         }
-    }
-
-    // Language matching results
-    const primaryFound = primary.length > 0;
-    const secondaryFound = secondary.length > 0;
-    
-    const languageMatch = {
-        primaryLang,
-        primaryFound,
-        primaryCount: primary.length,
-        primarySources: [...primarySources],
-        secondaryLang,
-        secondaryFound,
-        secondaryCount: secondary.length,
-        secondarySources: [...secondarySources],
-        othersCount: others.length
-    };
-
-    // Log language matching results
-    log('info', `Language matching: primary=${primaryLang} (${primary.length} found from: ${languageMatch.primarySources.join(', ') || 'none'}), secondary=${secondaryLang || 'none'} (${secondary.length} found from: ${languageMatch.secondarySources.join(', ') || 'none'}), others=${others.length}`);
-    
-    if (!primaryFound && primaryLang !== 'none') {
-        log('warn', `Primary language "${primaryLang}" not found in available subtitles`);
-    }
-    if (secondaryLang && secondaryLang !== 'none' && !secondaryFound) {
-        log('warn', `Secondary language "${secondaryLang}" not found in available subtitles`);
     }
 
     // Sort within each group by quality indicators
@@ -317,19 +273,78 @@ function prioritizeSubtitles(subtitles, config) {
         const hiA = a.hearingImpaired || a.isHearingImpaired || a.hi || false;
         const hiB = b.hearingImpaired || b.isHearingImpaired || b.hi || false;
         if (hiA !== hiB) return hiA ? 1 : -1;
-        
-        // Could add more sorting criteria here (release name match, etc.)
         return 0;
     };
 
-    primary.sort(sortByQuality);
-    secondary.sort(sortByQuality);
+    // Sort each language group
+    for (const lang of languages) {
+        byLanguage[lang].sort(sortByQuality);
+    }
     others.sort(sortByQuality);
 
-    // Combine and limit
-    const combined = [...primary, ...secondary, ...others];
+    // Build language match info
+    const languageMatch = {
+        languages: languages,
+        byLanguage: {},
+        selectedCount: 0,
+        othersCount: others.length
+    };
+    
+    for (const lang of languages) {
+        languageMatch.byLanguage[lang] = {
+            found: byLanguage[lang].length > 0,
+            count: byLanguage[lang].length,
+            sources: [...new Set(byLanguage[lang].map(s => 
+                Array.isArray(s.source) ? s.source[0] : (s.source || 'unknown')
+            ))]
+        };
+        languageMatch.selectedCount += byLanguage[lang].length;
+    }
+
+    // Log language matching results
+    const matchSummary = languages.map(lang => {
+        const info = languageMatch.byLanguage[lang];
+        return `${lang}(${info.count})`;
+    }).join(', ');
+    log('info', `Language matching: ${matchSummary}, others=${others.length}`);
+    
+    // Log warnings for missing languages
+    for (const lang of languages) {
+        if (!languageMatch.byLanguage[lang].found) {
+            log('warn', `Selected language "${lang}" not found in available subtitles`);
+        }
+    }
+
+    // Interleave subtitles from all languages for balanced distribution
+    // This ensures each language gets fair representation in the limited result set
+    const interleaved = [];
+    const indices = languages.reduce((acc, lang) => ({ ...acc, [lang]: 0 }), {});
+    
+    // Round-robin through languages
+    let hasMore = true;
+    while (hasMore && interleaved.length < MAX_SUBTITLES) {
+        hasMore = false;
+        for (const lang of languages) {
+            const langSubs = byLanguage[lang];
+            const idx = indices[lang];
+            if (idx < langSubs.length && interleaved.length < MAX_SUBTITLES) {
+                interleaved.push(langSubs[idx]);
+                indices[lang]++;
+                hasMore = true;
+            }
+        }
+    }
+
+    // Fill remaining slots with others if space allows
+    for (const sub of others) {
+        if (interleaved.length >= MAX_SUBTITLES) break;
+        interleaved.push(sub);
+    }
+
+    log('debug', `Interleaved ${interleaved.length} subtitles from ${languages.length} languages`);
+
     return {
-        subtitles: combined.slice(0, MAX_SUBTITLES),
+        subtitles: interleaved,
         languageMatch
     };
 }
@@ -343,9 +358,6 @@ function formatForStremio(subtitles) {
     log('debug', `[formatForStremio] Formatting ${subtitles.length} subtitles for Stremio`);
     
     // Get base URL for proxy
-    // This URL must be reachable by Stremio (could be on a different device)
-    // If SUBSENSE_BASE_URL is set, use it (for production deployments)
-    // Otherwise, construct from PORT (for local development)
     const port = process.env.PORT || 3100;
     const proxyBaseUrl = process.env.SUBSENSE_BASE_URL || `http://127.0.0.1:${port}`;
     
@@ -374,16 +386,6 @@ function formatForStremio(subtitles) {
             : `${displayName} | ${source}${hi}`;
 
         // Determine URL - use proxy for potential ASS format conversion
-        // 
-        // The provider's `format` and `needsConversion` flags indicate:
-        // - format: 'srt' | 'ass' | 'ssa' | 'vtt' | 'sub' | 'unknown' | null
-        // - needsConversion: true (definitely needs) | false (definitely not) | null (needs inspection)
-        //
-        // We proxy through our converter for:
-        // 1. needsConversion === true: Provider confirmed it needs conversion (e.g., format=ass)
-        // 2. needsConversion === null: Unknown format, proxy will inspect content and convert if ASS
-        // We DON'T proxy:
-        // - needsConversion === false: Provider confirmed it's SRT or another format we don't convert
         let url = sub.url;
         
         const needsProxy = proxyBaseUrl && sub.needsConversion !== false;
@@ -409,32 +411,34 @@ function formatForStremio(subtitles) {
     }).filter(sub => {
         const valid = !!sub.url;
         if (valid && log) {
-            log('debug', `[formatForStremio] Subtitle: id=${sub.id}, lang=${sub.lang}, source=${sub.source}, url=${sub.url}...`);
+            log('debug', `[formatForStremio] Subtitle: id=${sub.id}, lang=${sub.lang}, source=${sub.source}`);
         }
         return valid;
-    }); // Only return subs with valid URLs
+    });
 }
 
 /**
- * Refresh cache in background (fire-and-forget)
+ * Refresh cache in background for multiple languages (fire-and-forget)
  * @param {Object} parsed - Parsed Stremio ID
- * @param {string} primaryLang - Primary language code
- * @param {string|null} secondaryLang - Secondary language code
+ * @param {Array<string>} languages - Language codes (2-letter)
  * @returns {Promise} Background fetch promise
  */
-async function refreshCacheInBackground(parsed, primaryLang, secondaryLang) {
+async function refreshCacheInBackground(parsed, languages) {
     try {
         log('debug', `Background refresh starting for ${parsed.imdbId}`);
         
-        const result = await fetchSubtitlesFastFirst(parsed, primaryLang, secondaryLang);
+        const result = await fetchSubtitlesFastFirstMulti(parsed, languages);
         
         if (result.subtitles.length > 0 && subtitleCache) {
             // Cache ALL languages for future users
             cacheSubtitlesByLanguage(parsed, result.subtitles);
             log('debug', `Background refresh complete: ${result.subtitles.length} total subtitles`);
         }
+        
+        return result.subtitles;
     } catch (error) {
         log('warn', `Background refresh error: ${error.message}`);
+        return [];
     }
 }
 

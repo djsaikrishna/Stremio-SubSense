@@ -157,7 +157,14 @@
                 <canvas id="sourceChart"></canvas>
             </div>
             <div class="chart-container">
-                <h3>Subtitles by Language</h3>
+                <div class="chart-header">
+                    <h3 id="langChartTitle">Subtitles by Language (Top 10)</h3>
+                    <div class="chart-limit-selector">
+                        <button class="limit-btn" id="decreaseLimit" title="Show less">−</button>
+                        <span class="limit-value" id="limitValue">10</span>
+                        <button class="limit-btn" id="increaseLimit" title="Show more">+</button>
+                    </div>
+                </div>
                 <canvas id="langChart"></canvas>
             </div>
         </div>

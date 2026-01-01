@@ -316,16 +316,30 @@ async function loadRecentContent() {
         
         // Populate table
         tbody.innerHTML = data.items.map(item => {
-            const type = item.season !== null ? 'Series' : 'Movie';
-            const episodeInfo = item.season !== null 
-                ? ` (S${item.season}E${item.episode})` 
-                : '';
+            const isSeries = item.season !== null;
+            const typeBadge = isSeries 
+                ? '<span class="badge badge-series">Series</span>' 
+                : '<span class="badge badge-info">Movie</span>';
+            
+            // Format episode info with unified modern badge
+            let episodeBadge = '';
+            if (isSeries) {
+                const season = String(item.season).padStart(2, '0');
+                const episode = String(item.episode).padStart(2, '0');
+                episodeBadge = `<span class="episode-badge">S${season}E${episode}</span>`;
+            }
+            
             const sources = item.sources || '-';
             
             return `
                 <tr>
-                    <td><code>${item.imdb_id.toUpperCase()}${episodeInfo}</code></td>
-                    <td>${type}</td>
+                    <td>
+                        <div class="imdb-cell">
+                            <code>${item.imdb_id.toUpperCase()}</code>
+                            ${episodeBadge}
+                        </div>
+                    </td>
+                    <td>${typeBadge}</td>
                     <td>${item.languages_cached}</td>
                     <td>${item.total_subtitles}</td>
                     <td>${sources}</td>
