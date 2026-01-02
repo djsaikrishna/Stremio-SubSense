@@ -31,7 +31,12 @@
         </header>
 
         <div class="card">
-            <h2>🔍 Search by IMDB ID</h2>
+            <h2>
+                <svg class="section-icon" viewBox="0 0 24 24">
+                    <path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
+                </svg>
+                Search Content
+            </h2>
             <div class="search-container">
                 <input type="text" id="imdbSearch" class="search-input" placeholder="Enter IMDB ID (e.g., tt0111161)" maxlength="10">
                 <button id="searchBtn" class="search-btn">
@@ -45,7 +50,12 @@
         </div>
 
         <div class="card" id="resultCard" style="display: none;">
-            <h2 id="resultTitle">📽️ Content Details</h2>
+            <h2 id="resultTitle">
+                <svg class="section-icon" viewBox="0 0 24 24">
+                    <path d="M18 4l2 4h-3l-2-4h-2l2 4h-3l-2-4H8l2 4H7L5 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V4h-4z"/>
+                </svg>
+                Content Details
+            </h2>
             
             <div class="stats-grid grid-4">
                 <div class="stat-card">
@@ -110,7 +120,13 @@
         </div>
 
         <div class="card" id="notFoundCard" style="display: none; text-align: center;">
-            <h2>🔍 Content Not Found</h2>
+            <h2>
+                <svg class="section-icon" viewBox="0 0 24 24">
+                    <path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
+                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z" fill="none"/>
+                </svg>
+                Content Not Found
+            </h2>
             <p id="notFoundMessage" style="color: var(--color-text-secondary); margin-top: 12px;"></p>
             <p style="margin-top: 16px; font-size: 0.9rem; color: var(--color-text-muted);">
                 This content hasn't been requested yet, or its cache has expired.
@@ -118,7 +134,12 @@
         </div>
 
         <div class="card">
-            <h2>📚 Recently Cached Content</h2>
+            <h2>
+                <svg class="section-icon" viewBox="0 0 24 24">
+                    <path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H8V4h12v12zM10 9h8v2h-8zm0 3h4v2h-4zm0-6h8v2h-8z"/>
+                </svg>
+                Recently Cached
+            </h2>
             <p style="color: var(--color-text-secondary); margin-bottom: 16px;">Latest content added to the cache</p>
             
             <div class="table-responsive">

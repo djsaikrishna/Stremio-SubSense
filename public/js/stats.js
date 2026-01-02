@@ -117,13 +117,58 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 /**
- * Setup language selector event handler
+ * Setup language selector event handler (custom dropdown)
  */
 function setupLangSelector() {
-    const langSelector = document.getElementById('langSelector');
-    if (langSelector) {
-        langSelector.addEventListener('change', updateSelectedLangRate);
-    }
+    const wrapper = document.getElementById('langSelectorWrapper');
+    const trigger = document.getElementById('langSelectorTrigger');
+    const optionsContainer = document.getElementById('langSelectorOptions');
+    const hiddenInput = document.getElementById('langSelector');
+    
+    if (!trigger || !optionsContainer || !hiddenInput) return;
+    
+    // Toggle dropdown on trigger click
+    trigger.addEventListener('click', () => {
+        wrapper.classList.toggle('active');
+        trigger.classList.toggle('active');
+        optionsContainer.classList.toggle('show');
+    });
+    
+    // Close dropdown when clicking outside
+    document.addEventListener('click', (e) => {
+        if (!wrapper.contains(e.target)) {
+            wrapper.classList.remove('active');
+            trigger.classList.remove('active');
+            optionsContainer.classList.remove('show');
+        }
+    });
+    
+    // Handle option selection
+    optionsContainer.addEventListener('click', (e) => {
+        const option = e.target.closest('.custom-select-option');
+        if (option) {
+            const value = option.dataset.value;
+            const text = option.textContent;
+            
+            // Update hidden input and display text
+            hiddenInput.value = value;
+            document.getElementById('langSelectorText').textContent = text;
+            
+            // Update selected styling
+            optionsContainer.querySelectorAll('.custom-select-option').forEach(opt => {
+                opt.classList.remove('selected');
+            });
+            option.classList.add('selected');
+            
+            // Close dropdown
+            wrapper.classList.remove('active');
+            trigger.classList.remove('active');
+            optionsContainer.classList.remove('show');
+            
+            // Trigger update
+            updateSelectedLangRate();
+        }
+    });
 }
 
 /**
@@ -219,7 +264,7 @@ function initCharts() {
         }
     });
 
-    // Language distribution (Horizontal Bar Chart - more readable for many languages)
+    // Language distribution (Horizontal Bar Chart)
     const langCtx = document.getElementById('langChart').getContext('2d');
     langChart = new Chart(langCtx, {
         type: 'bar',
@@ -290,7 +335,7 @@ function initCharts() {
         }
     });
 
-    // Timing chart (line) - Enhanced styling
+    // Timing chart (line)
     const timingCtx = document.getElementById('timingChart').getContext('2d');
     
     // Create gradient for line chart
@@ -428,8 +473,10 @@ function updateLanguageMatching(stats) {
     document.getElementById('anyPreferredRate').textContent = `${lm.anyPreferredRate || 0}%`;
     document.getElementById('allPreferredRate').textContent = `${lm.allPreferredRate || 0}%`;
     
-    // Populate language selector for per-language success rate
+    // Populate language selector for per-language success rate (custom dropdown)
     const langSelector = document.getElementById('langSelector');
+    const optionsContainer = document.getElementById('langSelectorOptions');
+    const langSelectorText = document.getElementById('langSelectorText');
     const perLanguage = lm.perLanguage || [];
     
     // Store perLanguage data globally for selection handler
@@ -442,24 +489,38 @@ function updateLanguageMatching(stats) {
     const currentValue = langSelector.value;
     const newOptions = sortedPerLanguage.map(l => l.language_code).join(',');
     
-    if (langSelector.dataset.options !== newOptions) {
-        langSelector.innerHTML = '';
+    if (langSelector.dataset.options !== newOptions && optionsContainer) {
+        optionsContainer.innerHTML = '';
         
         if (sortedPerLanguage.length === 0) {
-            langSelector.innerHTML = '<option value="">No language data yet</option>';
+            optionsContainer.innerHTML = '<div class="custom-select-option" data-value="">No language data yet</div>';
+            if (langSelectorText) langSelectorText.textContent = 'No language data yet';
         } else {
             sortedPerLanguage.forEach((langData, index) => {
-                const opt = document.createElement('option');
-                opt.value = langData.language_code;
+                const opt = document.createElement('div');
+                opt.className = 'custom-select-option';
+                opt.dataset.value = langData.language_code;
                 opt.textContent = `${langData.language_code.toUpperCase()} - ${langData.total_requests} requests`;
-                langSelector.appendChild(opt);
+                
+                // Mark first or current as selected
+                if ((index === 0 && !currentValue) || langData.language_code === currentValue) {
+                    opt.classList.add('selected');
+                }
+                
+                optionsContainer.appendChild(opt);
             });
             
             // Default to highest-request language if nothing selected yet
             if (!currentValue && sortedPerLanguage.length > 0) {
                 langSelector.value = sortedPerLanguage[0].language_code;
-            } else {
-                langSelector.value = currentValue; // Restore selection
+                if (langSelectorText) {
+                    langSelectorText.textContent = `${sortedPerLanguage[0].language_code.toUpperCase()} - ${sortedPerLanguage[0].total_requests} requests`;
+                }
+            } else if (currentValue) {
+                const currentData = sortedPerLanguage.find(l => l.language_code === currentValue);
+                if (currentData && langSelectorText) {
+                    langSelectorText.textContent = `${currentData.language_code.toUpperCase()} - ${currentData.total_requests} requests`;
+                }
             }
         }
         
