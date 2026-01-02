@@ -254,9 +254,8 @@ app.get('/:config/manifest.json', (req, res) => {
     // Generate manifest with dynamic description
     const manifest = generateManifest(config);
     
-    // Remove configurationRequired after config is provided (so addon is installable)
-    // Check for new format (languages array) or legacy format (primaryLang)
-    const hasValidConfig = (config.languages && config.languages.length > 0) || config.primaryLang;
+    // Remove configurationRequired after valid config is provided
+    const hasValidConfig = config.languages && config.languages.length > 0;
     if (hasValidConfig) {
         delete manifest.behaviorHints.configurationRequired;
     }

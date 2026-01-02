@@ -28,7 +28,7 @@ const USE_FAST_FIRST = true;
  * Handle subtitle request from Stremio
  * Supports multi-language selection (up to 5 languages with equal priority)
  * @param {Object} args - Stremio request args (type, id, extra)
- * @param {Object} config - User configuration (languages array or legacy primaryLang/secondaryLang)
+ * @param {Object} config - User configuration (languages array)
  * @returns {Object} Stremio subtitle response
  */
 async function handleSubtitles(args, config) {
@@ -40,15 +40,8 @@ async function handleSubtitles(args, config) {
         const parsed = parseStremioId(args.id);
         log('debug', `[Subtitles] Parsed ID: imdb=${parsed.imdbId}, season=${parsed.season}, episode=${parsed.episode}`);
 
-        // Get languages from config (supports both new and legacy format)
+        // Get languages from config
         const languages = config.languages || [];
-        if (languages.length === 0 && config.primaryLang) {
-            // Legacy fallback
-            languages.push(config.primaryLang);
-            if (config.secondaryLang && config.secondaryLang !== 'none') {
-                languages.push(config.secondaryLang);
-            }
-        }
 
         // Log incoming request
         const sessionInfo = config.userId ? `session=${config.userId}` : 'no-session';
@@ -141,13 +134,19 @@ async function handleSubtitles(args, config) {
 
         // Log detailed request to database
         if (statsDB) {
+            // Compute per-request language success metrics
+            const anyPreferredFound = languages.some(lang => languageMatch?.byLanguage?.[lang]?.found);
+            const allPreferredFound = languages.every(lang => languageMatch?.byLanguage?.[lang]?.found);
+            
             statsDB.logRequest({
                 imdbId: parsed.imdbId,
                 contentType: parsed.type,
                 languages: languages,
                 resultCount: formatted.length,
                 cacheHit,
-                responseTimeMs: fetchTimeMs
+                responseTimeMs: fetchTimeMs,
+                anyPreferredFound,
+                allPreferredFound
             });
             
             statsDB.recordDaily({

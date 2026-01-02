@@ -20,7 +20,9 @@
                 <img src="/logo.png" alt="SubSense" class="logo-img">
                 <h1 class="title">SubSense</h1>
             </div>
-            <span class="version" id="versionBadge">Loading...</span>
+            <div class="header-meta">
+                <span class="version" id="versionBadge">Loading...</span>
+            </div>
             <p class="tagline">Real-time addon statistics and metrics</p>
             <nav class="nav-links">
                 <a href="/configure">Configure</a>
@@ -30,12 +32,21 @@
         </header>
 
         <div class="toggle-container">
-            <label class="toggle-switch">
-                <input type="checkbox" id="autoRefresh" checked>
-                <span class="toggle-slider"></span>
-            </label>
-            <span>Auto-refresh (30s)</span>
-            <span id="lastUpdated" style="margin-left: auto; color: var(--color-text-secondary); font-size: 0.9rem;"></span>
+            <div class="toggle-left">
+                <label class="toggle-switch">
+                    <input type="checkbox" id="autoRefresh" checked>
+                    <span class="toggle-slider"></span>
+                </label>
+                <span>Auto-refresh (30s)</span>
+            </div>
+            <div class="toggle-center">
+                <div class="active-sessions-badge" id="activeSessionsBadge">
+                    <span id="activeSessionsCount">0</span> active users
+                </div>
+            </div>
+            <div class="toggle-right">
+                <span id="lastUpdated"></span>
+            </div>
         </div>
 
         <div class="stats-grid">
@@ -122,21 +133,43 @@
 
         <div class="card">
             <h2>🎯 Language Matching</h2>
-            <div class="stats-grid" style="grid-template-columns: repeat(3, 1fr);">
+            <div class="stats-grid" style="grid-template-columns: repeat(2, 1fr);">
                 <div class="stat-card">
-                    <div class="value" id="primarySuccessRate">0%</div>
-                    <div class="label">Primary Found Rate</div>
+                    <div class="value" id="anyPreferredRate">0%</div>
+                    <div class="label">At Least One Preferred Found</div>
                 </div>
                 <div class="stat-card">
-                    <div class="value" id="primaryFound">0</div>
-                    <div class="label">Primary Found</div>
-                </div>
-                <div class="stat-card">
-                    <div class="value" id="combinedSuccessRate">0%</div>
-                    <div class="label">Preferred Languages Rate</div>
+                    <div class="value" id="allPreferredRate">0%</div>
+                    <div class="label">All Preferred Languages Found</div>
                 </div>
             </div>
-            <div style="margin-top: 20px;">
+            
+            <div style="margin-top: 24px; display: flex; gap: 24px; flex-wrap: wrap;">
+                <div style="flex: 1; min-width: 280px;">
+                    <h4>Per-Language Success Rate</h4>
+                    <div class="lang-selector-container" style="display: flex; gap: 12px; align-items: center; margin-top: 12px;">
+                        <div style="flex: 1; position: relative;">
+                            <select id="langSelector" class="modern-select">
+                                <option value="">Loading languages...</option>
+                            </select>
+                            <svg class="select-arrow" width="12" height="8" viewBox="0 0 12 8" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M1 1.5L6 6.5L11 1.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                            </svg>
+                        </div>
+                        <div class="lang-rate-badge">
+                            <span id="selectedLangRate">--%</span>
+                        </div>
+                    </div>
+                </div>
+                <div style="flex: 1; min-width: 280px;">
+                    <h4>Top Language Combinations</h4>
+                    <div id="langCombinations" style="margin-top: 12px; display: flex; flex-direction: column; gap: 8px;">
+                        <span style="color: var(--color-text-secondary);">No data yet</span>
+                    </div>
+                </div>
+            </div>
+            
+            <div style="margin-top: 24px;">
                 <h4>Top Successful Languages</h4>
                 <div id="topLanguages" style="display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px;">
                 </div>

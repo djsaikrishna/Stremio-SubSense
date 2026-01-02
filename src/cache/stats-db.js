@@ -169,8 +169,8 @@ class StatsDB {
         try {
             const stmt = db.prepare(`
                 INSERT INTO request_log 
-                    (imdb_id, content_type, languages, result_count, cache_hit, response_time_ms)
-                VALUES (?, ?, ?, ?, ?, ?)
+                    (imdb_id, content_type, languages, result_count, cache_hit, response_time_ms, any_preferred_found, all_preferred_found)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             `);
             stmt.run(
                 data.imdbId,
@@ -178,7 +178,9 @@ class StatsDB {
                 JSON.stringify(data.languages || []),
                 data.resultCount || 0,
                 data.cacheHit ? 1 : 0,
-                data.responseTimeMs || 0
+                data.responseTimeMs || 0,
+                data.anyPreferredFound ? 1 : 0,
+                data.allPreferredFound ? 1 : 0
             );
         } catch (error) {
             log('error', '[StatsDB] LogRequest error:', error.message);
@@ -305,15 +307,15 @@ class StatsDB {
     
     /**
      * Record language request/availability
-     * @param {Object} data - { languageCode, found, priority }
+     * All languages are treated with equal priority ('preferred')
+     * @param {Object} data - { languageCode, found }
      */
     recordLanguageStats(data) {
         const today = getLocalDateString();
-        const priority = data.priority || 'primary';
         try {
             const stmt = db.prepare(`
                 INSERT INTO language_stats (language_code, date, priority, requests_for, found_count, not_found_count)
-                VALUES (?, ?, ?, 1, ?, ?)
+                VALUES (?, ?, 'preferred', 1, ?, ?)
                 ON CONFLICT(language_code, date, priority) DO UPDATE SET
                     requests_for = requests_for + 1,
                     found_count = found_count + ?,
@@ -322,7 +324,6 @@ class StatsDB {
             stmt.run(
                 data.languageCode,
                 today,
-                priority,
                 data.found ? 1 : 0,
                 data.found ? 0 : 1,
                 data.found ? 1 : 0,
@@ -343,15 +344,14 @@ class StatsDB {
             const stmt = db.prepare(`
                 SELECT 
                     language_code,
-                    priority,
                     SUM(requests_for) as total_requests,
                     SUM(found_count) as found_count,
                     SUM(not_found_count) as not_found_count,
                     ROUND(SUM(found_count) * 100.0 / NULLIF(SUM(requests_for), 0), 1) as availability_rate
                 FROM language_stats 
                 WHERE date >= date('now', '-' || ? || ' days')
-                GROUP BY language_code, priority
-                ORDER BY priority, total_requests DESC
+                GROUP BY language_code
+                ORDER BY total_requests DESC
             `);
             return stmt.all(days);
         } catch (error) {
@@ -361,52 +361,58 @@ class StatsDB {
     }
     
     /**
-     * Get aggregated language match stats (primary vs secondary)
+     * Get aggregated language match stats
      * @param {number} days - Number of days to aggregate
-     * @returns {Object} { primary: { found, notFound, rate }, secondary: { found, notFound, rate }, combined: { rate } }
+     * @returns {Object} { totalRequests, found, notFound, successRate, perLanguage }
      */
     getLanguageMatchSummary(days = 30) {
         try {
-            const stmt = db.prepare(`
+            // Get aggregate stats across all languages
+            const aggregateStmt = db.prepare(`
                 SELECT 
-                    priority,
                     SUM(found_count) as found,
-                    SUM(not_found_count) as not_found
+                    SUM(not_found_count) as not_found,
+                    SUM(requests_for) as total_requests
                 FROM language_stats 
                 WHERE date >= date('now', '-' || ? || ' days')
-                GROUP BY priority
             `);
-            const rows = stmt.all(days);
+            const aggregate = aggregateStmt.get(days);
             
-            const primary = { found: 0, notFound: 0, rate: 0 };
-            const secondary = { found: 0, notFound: 0, rate: 0 };
+            // Get per-language success rates
+            const perLangStmt = db.prepare(`
+                SELECT 
+                    language_code,
+                    SUM(found_count) as found,
+                    SUM(not_found_count) as not_found,
+                    SUM(requests_for) as total_requests,
+                    ROUND(SUM(found_count) * 100.0 / NULLIF(SUM(requests_for), 0), 1) as success_rate
+                FROM language_stats 
+                WHERE date >= date('now', '-' || ? || ' days')
+                GROUP BY language_code
+                ORDER BY total_requests DESC
+            `);
+            const perLanguage = perLangStmt.all(days);
             
-            rows.forEach(row => {
-                if (row.priority === 'primary') {
-                    primary.found = row.found || 0;
-                    primary.notFound = row.not_found || 0;
-                } else if (row.priority === 'secondary') {
-                    secondary.found = row.found || 0;
-                    secondary.notFound = row.not_found || 0;
-                }
-            });
+            const totalRequests = aggregate?.total_requests || 0;
+            const found = aggregate?.found || 0;
+            const notFound = aggregate?.not_found || 0;
+            const successRate = totalRequests > 0 ? Math.round((found / totalRequests) * 100) : 0;
             
-            const primaryTotal = primary.found + primary.notFound;
-            const secondaryTotal = secondary.found + secondary.notFound;
-            const combinedFound = primary.found + secondary.found;
-            const combinedTotal = primaryTotal + secondaryTotal;
-            
-            primary.rate = primaryTotal > 0 ? Math.round((primary.found / primaryTotal) * 100) : 0;
-            secondary.rate = secondaryTotal > 0 ? Math.round((secondary.found / secondaryTotal) * 100) : 0;
-            const combinedRate = combinedTotal > 0 ? Math.round((combinedFound / combinedTotal) * 100) : 0;
-            
-            return { primary, secondary, combined: { rate: combinedRate, found: combinedFound, total: combinedTotal } };
+            return { 
+                totalRequests, 
+                found, 
+                notFound, 
+                successRate,
+                perLanguage
+            };
         } catch (error) {
             log('error', '[StatsDB] GetLanguageMatchSummary error:', error.message);
             return { 
-                primary: { found: 0, notFound: 0, rate: 0 }, 
-                secondary: { found: 0, notFound: 0, rate: 0 }, 
-                combined: { rate: 0, found: 0, total: 0 } 
+                totalRequests: 0,
+                found: 0,
+                notFound: 0,
+                successRate: 0,
+                perLanguage: []
             };
         }
     }
@@ -439,6 +445,75 @@ class StatsDB {
         } catch (error) {
             log('error', '[StatsDB] GetTopSuccessfulLanguages error:', error.message);
             return {};
+        }
+    }
+    
+    /**
+     * Get language matching success rates (any/all preferred)
+     * @param {number} days - Number of days to look back
+     * @returns {Object} { anyPreferredRate, allPreferredRate, totalRequests }
+     */
+    getLanguageSuccessRates(days = 30) {
+        try {
+            const stmt = db.prepare(`
+                SELECT 
+                    COUNT(*) as total_requests,
+                    SUM(CASE WHEN any_preferred_found = 1 THEN 1 ELSE 0 END) as any_found,
+                    SUM(CASE WHEN all_preferred_found = 1 THEN 1 ELSE 0 END) as all_found
+                FROM request_log 
+                WHERE created_at >= strftime('%s', 'now', '-' || ? || ' days')
+            `);
+            const result = stmt.get(days);
+            const totalRequests = result?.total_requests || 0;
+            const anyFound = result?.any_found || 0;
+            const allFound = result?.all_found || 0;
+            
+            return {
+                totalRequests,
+                anyPreferredRate: totalRequests > 0 ? Math.round((anyFound / totalRequests) * 100) : 0,
+                allPreferredRate: totalRequests > 0 ? Math.round((allFound / totalRequests) * 100) : 0
+            };
+        } catch (error) {
+            log('error', '[StatsDB] GetLanguageSuccessRates error:', error.message);
+            return { totalRequests: 0, anyPreferredRate: 0, allPreferredRate: 0 };
+        }
+    }
+    
+    /**
+     * Get most popular language combinations
+     * @param {number} days - Number of days to look back
+     * @param {number} limit - Max combinations to return
+     * @returns {Array} [{ languages: 'en,fr', count: 123 }, ...]
+     */
+    getPopularLanguageCombinations(days = 30, limit = 10) {
+        try {
+            const stmt = db.prepare(`
+                SELECT 
+                    languages,
+                    COUNT(*) as count
+                FROM request_log 
+                WHERE created_at >= strftime('%s', 'now', '-' || ? || ' days')
+                GROUP BY languages
+                ORDER BY count DESC
+                LIMIT ?
+            `);
+            const rows = stmt.all(days, limit);
+            return rows.map(row => {
+                // Parse JSON array and format as comma-separated uppercase codes
+                let langList;
+                try {
+                    langList = JSON.parse(row.languages);
+                } catch {
+                    langList = [row.languages];
+                }
+                return {
+                    languages: langList.map(l => l.toUpperCase()).join(', '),
+                    count: row.count
+                };
+            });
+        } catch (error) {
+            log('error', '[StatsDB] GetPopularLanguageCombinations error:', error.message);
+            return [];
         }
     }
     

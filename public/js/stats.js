@@ -111,9 +111,20 @@ document.addEventListener('DOMContentLoaded', () => {
     fetchVersion();
     initCharts();
     setupLimitSelector();
+    setupLangSelector();
     loadStats();
     setupAutoRefresh();
 });
+
+/**
+ * Setup language selector event handler
+ */
+function setupLangSelector() {
+    const langSelector = document.getElementById('langSelector');
+    if (langSelector) {
+        langSelector.addEventListener('change', updateSelectedLangRate);
+    }
+}
 
 /**
  * Fetch version from API
@@ -407,9 +418,70 @@ function updateOverview(stats) {
 function updateLanguageMatching(stats) {
     const lm = stats.languageMatching || {};
     
-    document.getElementById('primarySuccessRate').textContent = `${lm.primarySuccessRate || 0}%`;
-    document.getElementById('primaryFound').textContent = (lm.primaryFound || 0).toLocaleString();
-    document.getElementById('combinedSuccessRate').textContent = `${lm.preferredSuccessRate || 0}%`;
+    // Update active sessions in toggle container
+    const activeSessionsEl = document.getElementById('activeSessionsCount');
+    if (activeSessionsEl) {
+        activeSessionsEl.textContent = (lm.activeSessionCount || 0).toLocaleString();
+    }
+    
+    // Rate cards: at least one preferred & all preferred
+    document.getElementById('anyPreferredRate').textContent = `${lm.anyPreferredRate || 0}%`;
+    document.getElementById('allPreferredRate').textContent = `${lm.allPreferredRate || 0}%`;
+    
+    // Populate language selector for per-language success rate
+    const langSelector = document.getElementById('langSelector');
+    const perLanguage = lm.perLanguage || [];
+    
+    // Store perLanguage data globally for selection handler
+    window._perLanguageStats = perLanguage;
+    
+    // Sort by total_requests descending (highest first)
+    const sortedPerLanguage = [...perLanguage].sort((a, b) => b.total_requests - a.total_requests);
+    
+    // Only update options if they've changed
+    const currentValue = langSelector.value;
+    const newOptions = sortedPerLanguage.map(l => l.language_code).join(',');
+    
+    if (langSelector.dataset.options !== newOptions) {
+        langSelector.innerHTML = '';
+        
+        if (sortedPerLanguage.length === 0) {
+            langSelector.innerHTML = '<option value="">No language data yet</option>';
+        } else {
+            sortedPerLanguage.forEach((langData, index) => {
+                const opt = document.createElement('option');
+                opt.value = langData.language_code;
+                opt.textContent = `${langData.language_code.toUpperCase()} - ${langData.total_requests} requests`;
+                langSelector.appendChild(opt);
+            });
+            
+            // Default to highest-request language if nothing selected yet
+            if (!currentValue && sortedPerLanguage.length > 0) {
+                langSelector.value = sortedPerLanguage[0].language_code;
+            } else {
+                langSelector.value = currentValue; // Restore selection
+            }
+        }
+        
+        langSelector.dataset.options = newOptions;
+    }
+    
+    // Update selected language rate
+    updateSelectedLangRate();
+    
+    // Top language combinations
+    const combosContainer = document.getElementById('langCombinations');
+    const combos = lm.popularCombinations || [];
+    if (combos.length > 0) {
+        combosContainer.innerHTML = combos.slice(0, 5).map(combo => 
+            `<div class="combo-item">
+                <span class="combo-langs">${combo.languages}</span>
+                <span class="combo-count">${combo.count}</span>
+            </div>`
+        ).join('');
+    } else {
+        combosContainer.innerHTML = '<span style="color: var(--color-text-secondary);">No data yet</span>';
+    }
     
     // Top successful languages
     const topLangsContainer = document.getElementById('topLanguages');
@@ -425,6 +497,24 @@ function updateLanguageMatching(stats) {
     } else {
         topLangsContainer.innerHTML = '<span style="color: var(--text-muted);">No data yet</span>';
     }
+}
+
+/**
+ * Update the per-language success rate display
+ */
+function updateSelectedLangRate() {
+    const langSelector = document.getElementById('langSelector');
+    const rateDisplay = document.getElementById('selectedLangRate');
+    const perLanguage = window._perLanguageStats || [];
+    
+    if (langSelector.value && perLanguage.length > 0) {
+        const langData = perLanguage.find(l => l.language_code === langSelector.value);
+        if (langData) {
+            rateDisplay.textContent = `${langData.success_rate || 0}%`;
+            return;
+        }
+    }
+    rateDisplay.textContent = '--%';
 }
 
 /**

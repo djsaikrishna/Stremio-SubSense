@@ -31,10 +31,9 @@ const stats = {
         byLanguage: {}
     },
     languageMatching: {
-        primaryFound: 0,
-        primaryNotFound: 0,
-        secondaryFound: 0,
-        secondaryNotFound: 0,
+        totalRequests: 0,
+        found: 0,
+        notFound: 0,
         byLanguageSuccess: {} // Track which languages are frequently found
     },
     timing: {
@@ -100,24 +99,32 @@ function trackRequest({ type, fetchTimeMs, subtitleCount, subtitles = [], langua
         stats.subtitles.byLanguage[lang] = (stats.subtitles.byLanguage[lang] || 0) + 1;
     });
 
-    // Track language matching results
+    // Track language matching results (new model - all languages equal priority)
     if (languageMatch) {
-        if (languageMatch.primaryLang) {
-            if (languageMatch.primaryFound) {
-                stats.languageMatching.primaryFound++;
-                stats.languageMatching.byLanguageSuccess[languageMatch.primaryLang] = 
-                    (stats.languageMatching.byLanguageSuccess[languageMatch.primaryLang] || 0) + 1;
-            } else {
-                stats.languageMatching.primaryNotFound++;
-            }
-        }
-        if (languageMatch.secondaryLang && languageMatch.secondaryLang !== 'none') {
-            if (languageMatch.secondaryFound) {
-                stats.languageMatching.secondaryFound++;
-                stats.languageMatching.byLanguageSuccess[languageMatch.secondaryLang] = 
-                    (stats.languageMatching.byLanguageSuccess[languageMatch.secondaryLang] || 0) + 1;
-            } else {
-                stats.languageMatching.secondaryNotFound++;
+        // Track each language requested
+        if (languageMatch.languages && Array.isArray(languageMatch.languages)) {
+            languageMatch.languages.forEach(lang => {
+                stats.languageMatching.totalRequests++;
+                if (languageMatch.found && languageMatch.found.includes(lang)) {
+                    stats.languageMatching.found++;
+                    stats.languageMatching.byLanguageSuccess[lang] = 
+                        (stats.languageMatching.byLanguageSuccess[lang] || 0) + 1;
+                } else {
+                    stats.languageMatching.notFound++;
+                }
+            });
+        } else {
+            // Legacy fallback - single language check
+            const lang = languageMatch.primaryLang || languageMatch.language;
+            if (lang) {
+                stats.languageMatching.totalRequests++;
+                if (languageMatch.primaryFound || languageMatch.found) {
+                    stats.languageMatching.found++;
+                    stats.languageMatching.byLanguageSuccess[lang] = 
+                        (stats.languageMatching.byLanguageSuccess[lang] || 0) + 1;
+                } else {
+                    stats.languageMatching.notFound++;
+                }
             }
         }
     }
@@ -225,42 +232,53 @@ function getStats() {
     const totalMovies = persistentStats.total_movies || stats.requests.movie;
     const totalSeries = persistentStats.total_series || stats.requests.series;
     const totalSubtitles = persistentStats.total_subtitles || stats.subtitles.total;
-    
-    // Preferred languages rate - success if primary OR secondary found
-    const preferredRequests = persistentStats.preferred_requests || 0;
-    const preferredFound = persistentStats.preferred_found || 0;
-    const preferredSuccessRate = preferredRequests > 0 
-        ? Math.round((preferredFound / preferredRequests) * 100) 
-        : 0;
 
-    // Use DB-backed language match stats if available
-    let primaryFoundCount, primaryNotFound, secondaryFound, secondaryNotFound, primarySuccessRate, secondarySuccessRate;
+    // New model: get language match stats and active sessions from DB
+    let langTotalRequests = 0;
+    let langFound = 0;
+    let langNotFound = 0;
+    let successRate = 0;
     let byLanguageSuccess = {};
+    let activeSessionCount = 0;
+    let perLanguage = [];
+    let anyPreferredRate = 0;
+    let allPreferredRate = 0;
+    let popularCombinations = [];
     
     if (languageMatchSummary) {
-        primaryFoundCount = languageMatchSummary.primary.found;
-        primaryNotFound = languageMatchSummary.primary.notFound;
-        secondaryFound = languageMatchSummary.secondary.found;
-        secondaryNotFound = languageMatchSummary.secondary.notFound;
-        primarySuccessRate = languageMatchSummary.primary.rate;
-        secondarySuccessRate = languageMatchSummary.secondary.rate;
+        langTotalRequests = languageMatchSummary.totalRequests || 0;
+        langFound = languageMatchSummary.found || 0;
+        langNotFound = languageMatchSummary.notFound || 0;
+        successRate = languageMatchSummary.successRate || 0;
         byLanguageSuccess = topLanguages;
+        perLanguage = languageMatchSummary.perLanguage || [];
     } else {
         // Fallback to in-memory
-        primaryFoundCount = stats.languageMatching.primaryFound;
-        primaryNotFound = stats.languageMatching.primaryNotFound;
-        secondaryFound = stats.languageMatching.secondaryFound;
-        secondaryNotFound = stats.languageMatching.secondaryNotFound;
+        langTotalRequests = stats.languageMatching.totalRequests || 0;
+        langFound = stats.languageMatching.found || 0;
+        langNotFound = stats.languageMatching.notFound || 0;
+        successRate = langTotalRequests > 0 
+            ? Math.round((langFound / langTotalRequests) * 100) 
+            : 0;
         byLanguageSuccess = stats.languageMatching.byLanguageSuccess;
-        
-        const totalPrimaryRequests = primaryFoundCount + primaryNotFound;
-        const totalSecondaryRequests = secondaryFound + secondaryNotFound;
-        primarySuccessRate = totalPrimaryRequests > 0 
-            ? Math.round((primaryFoundCount / totalPrimaryRequests) * 100) 
-            : 0;
-        secondarySuccessRate = totalSecondaryRequests > 0 
-            ? Math.round((secondaryFound / totalSecondaryRequests) * 100) 
-            : 0;
+    }
+    
+    // Get active sessions count and language success rates
+    if (db) {
+        try {
+            const userStats = db.getAggregateUserStats();
+            activeSessionCount = userStats?.activeSessions?.last30Days || 0;
+            
+            // Get any/all preferred rates
+            const successRates = db.getLanguageSuccessRates(30);
+            anyPreferredRate = successRates.anyPreferredRate || 0;
+            allPreferredRate = successRates.allPreferredRate || 0;
+            
+            // Get popular language combinations
+            popularCombinations = db.getPopularLanguageCombinations(30, 10);
+        } catch (e) {
+            // Fallback to 0
+        }
     }
 
     // Build daily activity from DB or in-memory
@@ -302,14 +320,16 @@ function getStats() {
             byLanguage: subtitlesByLanguage
         },
         languageMatching: {
-            primaryFound: primaryFoundCount,
-            primaryNotFound,
-            secondaryFound,
-            secondaryNotFound,
+            totalRequests: langTotalRequests,
+            found: langFound,
+            notFound: langNotFound,
+            successRate,
             byLanguageSuccess,
-            primarySuccessRate,
-            secondarySuccessRate,
-            preferredSuccessRate  // Success if primary OR secondary was found
+            activeSessionCount,
+            perLanguage,
+            anyPreferredRate,
+            allPreferredRate,
+            popularCombinations
         },
         timing: {
             avgMs,
@@ -362,7 +382,7 @@ function resetStats() {
     stats.startedAt = new Date();
     stats.requests = { total: 0, movie: 0, series: 0, byDate: {} };
     stats.subtitles = { total: 0, bySource: {}, byLanguage: {} };
-    stats.languageMatching = { primaryFound: 0, primaryNotFound: 0, secondaryFound: 0, secondaryNotFound: 0, byLanguageSuccess: {} };
+    stats.languageMatching = { totalRequests: 0, found: 0, notFound: 0, byLanguageSuccess: {} };
     stats.timing = { totalMs: 0, count: 0, minMs: Infinity, maxMs: 0, history: [] };
     stats.errors = { total: 0, recent: [] };
 }

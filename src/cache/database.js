@@ -79,6 +79,8 @@ CREATE TABLE IF NOT EXISTS request_log (
     result_count INTEGER,
     cache_hit INTEGER,
     response_time_ms INTEGER,
+    any_preferred_found INTEGER DEFAULT 0,
+    all_preferred_found INTEGER DEFAULT 0,
     created_at INTEGER DEFAULT (strftime('%s', 'now'))
 );
 
@@ -102,12 +104,12 @@ CREATE INDEX IF NOT EXISTS idx_provider_stats_date
 ON provider_stats(date);
 
 -- Language analytics table
--- Updated: Added priority column to distinguish primary vs secondary language requests
+-- Tracks success rate of finding subtitles for each language
 CREATE TABLE IF NOT EXISTS language_stats (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     language_code TEXT NOT NULL,
     date TEXT NOT NULL,
-    priority TEXT DEFAULT 'primary', -- 'primary' or 'secondary'
+    priority TEXT DEFAULT 'preferred', 
     requests_for INTEGER DEFAULT 0,
     found_count INTEGER DEFAULT 0,
     not_found_count INTEGER DEFAULT 0,
@@ -117,6 +119,7 @@ CREATE TABLE IF NOT EXISTS language_stats (
 CREATE INDEX IF NOT EXISTS idx_language_stats_date 
 ON language_stats(date);
 
+-- Legacy index - kept for backwards compatibility
 CREATE INDEX IF NOT EXISTS idx_language_stats_priority 
 ON language_stats(priority);
 
