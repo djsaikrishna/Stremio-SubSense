@@ -3,6 +3,12 @@
  * Modern Multi-Language Selection (Tag Input)
  */
 
+// Configuration constants
+const MAX_LANGUAGES = 5;
+const STORAGE_KEY = 'subsense_selected_languages';
+const MAX_SUBTITLES_STORAGE_KEY = 'subsense_max_subtitles';
+const DEFAULT_MAX_SUBTITLES = 10; // Default is 10, 0 means unlimited
+
 // Supported languages (ISO 639-2/B codes) - Alphabetically sorted
 // Full Wyzie-supported language list
 const LANGUAGES = [
@@ -191,12 +197,11 @@ const LANGUAGES = [
     { code: 'zul', name: 'Zulu' }
 ];
 
-// Configuration constants
-const MAX_LANGUAGES = 5;
-const STORAGE_KEY = 'subsense_selected_languages';
+
 
 // State
 let selectedLanguages = [];
+let selectedMaxSubtitles = DEFAULT_MAX_SUBTITLES;
 let highlightIndex = -1;
 
 // DOM Elements
@@ -215,10 +220,18 @@ const copyUrlBtn = document.getElementById('copyUrl');
 const versionBadge = document.getElementById('versionBadge');
 const toast = document.getElementById('toast');
 
+// MAX_SUBTITLES custom dropdown elements
+const maxSubtitlesWrapper = document.getElementById('maxSubtitlesWrapper');
+const maxSubtitlesTrigger = document.getElementById('maxSubtitlesTrigger');
+const maxSubtitlesOptions = document.getElementById('maxSubtitlesOptions');
+const maxSubtitlesText = document.getElementById('maxSubtitlesText');
+const maxSubtitlesSelect = document.getElementById('maxSubtitlesSelect');
+
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
     fetchVersion();
     restoreSavedLanguages(); // Restore from localStorage first
+    restoreSavedMaxSubtitles(); // Restore max subtitles setting
     renderOptions();
     setupEventListeners();
     updateInstallButtonState();
@@ -233,6 +246,58 @@ function saveLanguagesToStorage() {
     } catch (error) {
         console.warn('Failed to save languages to localStorage:', error);
     }
+}
+
+/**
+ * Save max subtitles setting to localStorage
+ */
+function saveMaxSubtitlesToStorage() {
+    try {
+        localStorage.setItem(MAX_SUBTITLES_STORAGE_KEY, selectedMaxSubtitles.toString());
+    } catch (error) {
+        console.warn('Failed to save max subtitles to localStorage:', error);
+    }
+}
+
+/**
+ * Restore max subtitles setting from localStorage
+ */
+function restoreSavedMaxSubtitles() {
+    try {
+        const saved = localStorage.getItem(MAX_SUBTITLES_STORAGE_KEY);
+        if (saved !== null) {
+            const parsed = parseInt(saved, 10);
+            if (!isNaN(parsed) && parsed >= 0 && parsed <= 100) {
+                selectedMaxSubtitles = parsed;
+                updateMaxSubtitlesUI(parsed);
+            }
+        }
+    } catch (error) {
+        console.warn('Failed to restore max subtitles from localStorage:', error);
+    }
+}
+
+/**
+ * Update the MAX_SUBTITLES dropdown UI to reflect the selected value
+ */
+function updateMaxSubtitlesUI(value) {
+    if (!maxSubtitlesText || !maxSubtitlesOptions || !maxSubtitlesSelect) return;
+    
+    // Update display text
+    maxSubtitlesText.textContent = value === 0 ? 'Unlimited' : value.toString();
+    
+    // Update hidden input
+    maxSubtitlesSelect.value = value.toString();
+    
+    // Update selected option styling
+    const options = maxSubtitlesOptions.querySelectorAll('.custom-select-option');
+    options.forEach(opt => {
+        if (parseInt(opt.dataset.value, 10) === value) {
+            opt.classList.add('selected');
+        } else {
+            opt.classList.remove('selected');
+        }
+    });
 }
 
 /**
@@ -490,6 +555,43 @@ function setupEventListeners() {
         installDropdownToggle.classList.toggle('active');
     });
 
+    // Max Subtitles Custom Dropdown
+    if (maxSubtitlesTrigger && maxSubtitlesOptions) {
+        // Toggle dropdown on click
+        maxSubtitlesTrigger.addEventListener('click', (e) => {
+            e.stopPropagation();
+            maxSubtitlesWrapper.classList.toggle('active');
+            maxSubtitlesTrigger.classList.toggle('active');
+            maxSubtitlesOptions.classList.toggle('show');
+        });
+        
+        // Handle option selection
+        const options = maxSubtitlesOptions.querySelectorAll('.custom-select-option');
+        options.forEach(opt => {
+            opt.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const value = parseInt(opt.dataset.value, 10);
+                selectedMaxSubtitles = value;
+                updateMaxSubtitlesUI(value);
+                saveMaxSubtitlesToStorage();
+                
+                // Close dropdown
+                maxSubtitlesWrapper.classList.remove('active');
+                maxSubtitlesTrigger.classList.remove('active');
+                maxSubtitlesOptions.classList.remove('show');
+            });
+        });
+        
+        // Close dropdown when clicking outside
+        document.addEventListener('click', (e) => {
+            if (!maxSubtitlesWrapper.contains(e.target)) {
+                maxSubtitlesWrapper.classList.remove('active');
+                maxSubtitlesTrigger.classList.remove('active');
+                maxSubtitlesOptions.classList.remove('show');
+            }
+        });
+    }
+
     // Buttons
     installBtn.addEventListener('click', installAddon);
     installDirectly.addEventListener('click', installAddon);
@@ -540,6 +642,11 @@ function getManifestUrl() {
         languages: selectedLanguages
     };
     
+    // Only include maxSubtitles if it's not unlimited (0) - backend defaults to unlimited
+    if (selectedMaxSubtitles > 0) {
+        config.maxSubtitles = selectedMaxSubtitles;
+    }
+    
     const userId = generateUserId();
     const configString = encodeURIComponent(JSON.stringify(config));
     const host = window.location.host;
@@ -555,6 +662,11 @@ function getStremioUrl() {
     const config = {
         languages: selectedLanguages
     };
+    
+    // Only include maxSubtitles if it's not unlimited (0) - backend defaults to unlimited
+    if (selectedMaxSubtitles > 0) {
+        config.maxSubtitles = selectedMaxSubtitles;
+    }
     
     const userId = generateUserId();
     const configString = encodeURIComponent(JSON.stringify(config));

@@ -307,7 +307,16 @@ body::before {
 .form-group {
     margin-bottom: 24px;
     position: relative;
-    z-index: 200; /* Ensure multiselect is above other content */
+}
+
+/* Language selector needs higher z-index for dropdown */
+.form-group:has(.multiselect-container) {
+    z-index: 200;
+}
+
+/* MAX_SUBTITLES select has lower z-index */
+.form-group:has(.select-container) {
+    z-index: 100;
 }
 
 label {
@@ -352,7 +361,7 @@ label {
 .install-container {
     margin-top: 28px;
     position: relative;
-    z-index: 100;
+    z-index: 50;
     text-align: center; /* Center the inline-flex wrapper */
 }
 
@@ -905,6 +914,12 @@ label {
 .multiselect-container {
     position: relative;
     width: 100%;
+    z-index: 100;
+}
+
+/* When active (dropdown open), raise z-index to be above other form elements */
+.multiselect-container.active {
+    z-index: 300;
 }
 
 .multiselect-input-wrapper {
@@ -1278,7 +1293,7 @@ code:hover {
     border: 1px solid var(--color-border-strong);
     border-radius: 12px;
     overflow: hidden;
-    z-index: 100;
+    z-index: 500;
     max-height: 250px;
     overflow-y: auto;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);

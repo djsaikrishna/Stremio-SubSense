@@ -116,7 +116,8 @@ async function handleSubtitles(args, config) {
         }
 
         // Prioritize by user's selected languages (all with equal priority)
-        const { subtitles: prioritized, languageMatch } = prioritizeSubtitlesMulti(rawSubtitles, languages);
+        const maxSubtitles = config.maxSubtitles || 0; // 0 means unlimited
+        const { subtitles: prioritized, languageMatch } = prioritizeSubtitlesMulti(rawSubtitles, languages, maxSubtitles);
         log('debug', `After prioritization: ${prioritized.length} subtitles`);
 
         // Format for Stremio
@@ -257,9 +258,10 @@ async function fetchSubtitles(parsed) {
  * Interleaves subtitles across all selected languages to ensure balanced distribution
  * @param {Array} subtitles - Raw subtitles from providers
  * @param {Array<string>} languages - User's selected languages (3-letter codes)
+ * @param {number} maxSubtitles - Max subtitles per language (0 = unlimited)
  * @returns {Object} { subtitles: Array, languageMatch: Object }
  */
-function prioritizeSubtitlesMulti(subtitles, languages) {
+function prioritizeSubtitlesMulti(subtitles, languages, maxSubtitles = 0) {
     // Convert Stremio 3-letter codes to wyzie 2-letter for comparison
     const wyzieLangs = languages.map(lang => ({
         stremio: lang,
@@ -335,17 +337,19 @@ function prioritizeSubtitlesMulti(subtitles, languages) {
         }
     }
 
-    // Return up to MAX_SUBTITLES per language
+    // Return up to maxSubtitles per language (0 = unlimited)
     const results = [];
+    const limit = maxSubtitles > 0 ? maxSubtitles : Infinity;
     
     for (const lang of languages) {
         const langSubs = byLanguage[lang];
-        // Take up to MAX_SUBTITLES for this language
-        const limited = langSubs.slice(0, MAX_SUBTITLES);
+        // Take up to maxSubtitles for this language
+        const limited = maxSubtitles > 0 ? langSubs.slice(0, maxSubtitles) : langSubs;
         results.push(...limited);
     }
 
-    log('debug', `Returning ${results.length} subtitles from ${languages.length} languages (up to ${MAX_SUBTITLES} per language)`);
+    const limitStr = maxSubtitles > 0 ? maxSubtitles.toString() : 'unlimited';
+    log('debug', `Returning ${results.length} subtitles from ${languages.length} languages (max ${limitStr} per language)`);
 
     return {
         subtitles: results,

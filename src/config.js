@@ -4,15 +4,19 @@ const { log } = require('./utils');
 // Maximum number of languages allowed
 const MAX_LANGUAGES = 5;
 
+// Default max subtitles per language (0 = unlimited)
+const DEFAULT_MAX_SUBTITLES_PER_LANG = 0;
+
 /**
  * Parse and validate user configuration
  * Supports both legacy (primaryLang/secondaryLang) and new (languages array) formats
  * @param {Object|string} config - Config object or comma-separated string
- * @returns {Object} Validated config with languages array
+ * @returns {Object} Validated config with languages array and maxSubtitles
  * @throws {Error} If no language is configured
  */
 function parseConfig(config) {
     let languages = [];
+    let maxSubtitles = DEFAULT_MAX_SUBTITLES_PER_LANG;
 
     // Handle different config formats
     if (typeof config === 'string' && config.length > 0) {
@@ -20,7 +24,7 @@ function parseConfig(config) {
         const parts = config.split(',').filter(p => p && p !== 'none');
         languages = parts;
     } else if (typeof config === 'object' && config !== null) {
-        // New format: { languages: ['eng', 'fra', 'spa'] }
+        // New format: { languages: ['eng', 'fra', 'spa'], maxSubtitles: 10 }
         if (Array.isArray(config.languages)) {
             languages = config.languages.filter(l => l && l !== 'none');
         }
@@ -29,6 +33,16 @@ function parseConfig(config) {
             languages.push(config.primaryLang);
             if (config.secondaryLang && config.secondaryLang !== 'none') {
                 languages.push(config.secondaryLang);
+            }
+        }
+        
+        // Parse maxSubtitles from config
+        if (typeof config.maxSubtitles === 'number' && config.maxSubtitles >= 0) {
+            maxSubtitles = Math.min(config.maxSubtitles, 100); // Cap at 100
+        } else if (typeof config.maxSubtitles === 'string') {
+            const parsed = parseInt(config.maxSubtitles, 10);
+            if (!isNaN(parsed) && parsed >= 0) {
+                maxSubtitles = Math.min(parsed, 100);
             }
         }
     }
@@ -63,10 +77,11 @@ function parseConfig(config) {
         throw new Error('No valid languages configured. Please configure the addon again.');
     }
 
-    log('debug', `Config parsed: languages=[${validLanguages.join(', ')}]`);
+    log('debug', `Config parsed: languages=[${validLanguages.join(', ')}], maxSubtitles=${maxSubtitles || 'unlimited'}`);
 
     return {
         languages: validLanguages,
+        maxSubtitles: maxSubtitles,
         // For backward compatibility, expose first language as primaryLang
         primaryLang: validLanguages[0],
         secondaryLang: validLanguages[1] || 'none'
@@ -92,5 +107,6 @@ function encodeConfig(config) {
 
 module.exports = {
     parseConfig,
-    MAX_LANGUAGES
+    MAX_LANGUAGES,
+    DEFAULT_MAX_SUBTITLES_PER_LANG
 };
