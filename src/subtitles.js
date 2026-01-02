@@ -2,6 +2,7 @@ const { providerManager, WyzieProvider } = require('./providers');
 const { parseStremioId, log } = require('./utils');
 const { mapStremioToWyzie, mapWyzieToStremio, normalizeLanguageCode } = require('./languages');
 const statsService = require('./stats');
+const { isAssFormat } = require('./services/subtitle-converter');
 
 const MAX_SUBTITLES = parseInt(process.env.MAX_SUBTITLES, 10) || 30;
 
@@ -354,6 +355,10 @@ function prioritizeSubtitlesMulti(subtitles, languages) {
 
 /**
  * Format subtitles for Stremio response
+ * Implements dual-format strategy: ASS subtitles are returned as both:
+ * 1. Original ASS format (for devices that support it)
+ * 2. Converted SRT format (for devices that don't support ASS)
+ * 
  * @param {Array} subtitles - Prioritized subtitles
  * @returns {Array} Stremio-formatted subtitle objects
  */
@@ -364,7 +369,10 @@ function formatForStremio(subtitles) {
     const port = process.env.PORT || 3100;
     const proxyBaseUrl = process.env.SUBSENSE_BASE_URL || `http://127.0.0.1:${port}`;
     
-    return subtitles.map((sub, index) => {
+    const results = [];
+    let outputIndex = 0;
+    
+    for (const sub of subtitles) {
         // Get language code (wyzie uses 2-letter, Stremio needs 3-letter)
         const subLang = sub.lang || sub.language || 'und';
         const lang = mapWyzieToStremio(subLang.substring(0, 2));
@@ -378,46 +386,86 @@ function formatForStremio(subtitles) {
             source = Array.isArray(sub.source) ? sub.source[0] : sub.source;
         }
 
-        // Build label with display name and source
+        // Build label components
         const hi = (sub.hearingImpaired || sub.isHearingImpaired || sub.hi) ? ' [HI]' : '';
         const release = sub.releaseName || sub.release || '';
         const mediaPart = release || sub.media || '';
         
-        // Format: "English | opensubtitles - Release Name [HI]"
-        const label = mediaPart 
+        // Base label: "English | opensubtitles - Release Name [HI]"
+        const baseLabel = mediaPart 
             ? `${displayName} | ${source} - ${mediaPart}${hi}`
             : `${displayName} | ${source}${hi}`;
 
-        // Determine URL - use proxy for potential ASS format conversion
-        let url = sub.url;
+        // Determine the subtitle format
+        const format = (sub.format || '').toLowerCase();
+        const isAss = format === 'ass' || format === 'ssa' || sub.needsConversion === true;
         
-        const needsProxy = proxyBaseUrl && sub.needsConversion !== false;
+        // Generate unique subtitle ID base
+        const subIdBase = sub.id || Date.now();
         
-        if (needsProxy) {
-            // Wrap in our conversion proxy which will inspect content and convert if ASS
-            url = `${proxyBaseUrl}/api/subtitle/srt/${sub.url}`;
+        if (isAss && proxyBaseUrl) {
+            // === DUAL FORMAT: Return both ASS (original) and SRT (converted) ===
             
-            if (sub.needsConversion === true) {
-                log('debug', `[formatForStremio] Proxying ${sub.format || 'unknown'}→SRT: ${sub.url.substring(0, 50)}...`);
-            } else {
-                log('debug', `[formatForStremio] Proxying for inspection (format=${sub.format || 'unknown'}): ${sub.url.substring(0, 50)}...`);
+            // 1. First: Original ASS subtitle (passthrough - no conversion)
+            const assUrl = `${proxyBaseUrl}/api/subtitle/ass/${sub.url}`;
+            results.push({
+                id: `subsense-${outputIndex}-${subIdBase}-ass-${source}`,
+                url: assUrl,
+                lang: lang,
+                label: baseLabel,
+                source: source
+            });
+            log('debug', `[formatForStremio] [${outputIndex}] ASS original: ${sub.url.substring(0, 50)}...`);
+            outputIndex++;
+            
+            // 2. Second: Converted SRT subtitle (goes through converter)
+            const srtUrl = `${proxyBaseUrl}/api/subtitle/srt/${sub.url}`;
+            results.push({
+                id: `subsense-${outputIndex}-${subIdBase}-srt-${source}`,
+                url: srtUrl,
+                lang: lang,
+                label: baseLabel,
+                source: source
+            });
+            log('debug', `[formatForStremio] [${outputIndex}] SRT converted: ${sub.url.substring(0, 50)}...`);
+            outputIndex++;
+            
+        } else {
+            // === SINGLE FORMAT: Non-ASS subtitles or no proxy available ===
+            
+            // Determine URL - use proxy for inspection if available
+            let url = sub.url;
+            const detectedFormat = format || 'srt'; // Default to SRT if unknown
+            
+            if (proxyBaseUrl && sub.needsConversion !== false) {
+                // Wrap in proxy for potential format inspection/conversion
+                url = `${proxyBaseUrl}/api/subtitle/srt/${sub.url}`;
+                log('debug', `[formatForStremio] [${outputIndex}] Proxying ${detectedFormat}: ${sub.url.substring(0, 50)}...`);
             }
+            
+            results.push({
+                id: `subsense-${outputIndex}-${subIdBase}-${detectedFormat}-${source}`,
+                url: url,
+                lang: lang,
+                label: baseLabel,
+                source: source
+            });
+            outputIndex++;
         }
-
-        return {
-            id: `subsense-${index}-${sub.id || Date.now()}-${source}`,
-            url: url,
-            lang: lang,
-            label: label,
-            source: source
-        };
-    }).filter(sub => {
+    }
+    
+    // Filter out any entries without valid URLs
+    const validResults = results.filter(sub => {
         const valid = !!sub.url;
-        if (valid && log) {
+        if (valid) {
             log('debug', `[formatForStremio] Subtitle: id=${sub.id}, lang=${sub.lang}, source=${sub.source}`);
         }
         return valid;
     });
+    
+    log('info', `[formatForStremio] Formatted ${subtitles.length} subtitles → ${validResults.length} entries (ASS duplicated as ASS+SRT)`);
+    
+    return validResults;
 }
 
 /**

@@ -277,11 +277,16 @@ app.get('/manifest.json', (req, res) => {
 });
 
 /**
- * Subtitle proxy endpoint - converts ASS/SSA to SRT on the fly
- * URL format: /api/subtitle/srt/{encoded_original_url}
+ * Subtitle proxy endpoint - converts ASS/SSA to SRT on the fly OR passes through as-is
+ * URL format: /api/subtitle/:format/{encoded_original_url}
  * 
- * This allows Stremio to receive SRT format which it handles better
- * than ASS format (which can cause "no tracks" errors in some cases)
+ * Supported formats:
+ * - /api/subtitle/srt/{url} - Convert ASS to SRT, pass through SRT as-is
+ * - /api/subtitle/ass/{url} - Pass through original content (no conversion)
+ * 
+ * This allows Stremio to receive both formats:
+ * - Original ASS for devices that support it (better styling)
+ * - Converted SRT for devices that don't support ASS
  */
 app.get('/api/subtitle/:format/*', async (req, res) => {
     const { format } = req.params;
@@ -300,6 +305,15 @@ app.get('/api/subtitle/:format/*', async (req, res) => {
         
         const content = await response.text();
         
+        // ASS format requested - pass through as-is (no conversion)
+        if (format === 'ass' || format === 'ssa') {
+            log('debug', `Passing through ASS subtitle (${content.length} chars)`);
+            res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.setHeader('X-SubSense-Format', 'ass-passthrough');
+            return res.send(content);
+        }
+        
         // If SRT format requested and content is ASS, convert it
         if (format === 'srt' && isAssFormat(content)) {
             log('debug', `Converting ASS to SRT (${content.length} chars)`);
@@ -312,12 +326,14 @@ app.get('/api/subtitle/:format/*', async (req, res) => {
             res.setHeader('Access-Control-Allow-Origin', '*');
             res.setHeader('X-Original-Format', result.originalFormat);
             res.setHeader('X-Caption-Count', result.captionCount);
+            res.setHeader('X-SubSense-Format', 'converted-to-srt');
             return res.send(result.srt);
         }
         
         // Otherwise, pass through as-is
         res.setHeader('Content-Type', response.headers.get('content-type') || 'text/plain');
         res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('X-SubSense-Format', 'passthrough');
         res.send(content);
         
     } catch (error) {
