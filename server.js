@@ -405,11 +405,11 @@ app.use(getRouter(addonInterface));
 
 // Start server
 app.listen(PORT, () => {
-    log('info', `SubSense addon running at ${PUBLIC_BASE_URL}`);
-    log('info', `Configure at ${PUBLIC_BASE_URL}/configure`);
-    log('info', `Stats at ${PUBLIC_BASE_URL}/stats`);
-    log('info', `Manifest at ${PUBLIC_BASE_URL}/manifest.json`);
+    log('info', `[Server] SubSense addon running at ${PUBLIC_BASE_URL}`);
+    log('info', `[Server] Configure at ${PUBLIC_BASE_URL}/configure`);
+    log('info', `[Server] Stats at ${PUBLIC_BASE_URL}/stats`);
+    log('info', `[Server] Manifest at ${PUBLIC_BASE_URL}/manifest.json`);
     if (PUBLIC_BASE_URL !== LOCAL_BASE_URL) {
-        log('info', `Internal proxy URL: ${LOCAL_BASE_URL}`);
+        log('info', `[Server] Internal proxy URL: ${LOCAL_BASE_URL}`);
     }
 });

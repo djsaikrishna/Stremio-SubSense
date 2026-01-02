@@ -99,7 +99,7 @@ function getCacheStats() {
             sizeMB: sizeInfo ? (sizeInfo.size_bytes / 1024 / 1024).toFixed(2) : 'unknown'
         };
     } catch (error) {
-        console.error('[Cache] Stats error:', error.message);
+        log('error', '[Cache] Stats error:', error.message);
         return null;
     }
 }
@@ -117,7 +117,7 @@ function runCleanup() {
  * Start the background cleaner
  */
 function startCleaner() {
-    log('info', `Starting background cleaner (cache: ${CACHE_RETENTION_DAYS} days, sessions: ${SESSION_RETENTION_DAYS} days)`);
+    log('info', `[Cache] Starting background cleaner (cache: ${CACHE_RETENTION_DAYS} days, sessions: ${SESSION_RETENTION_DAYS} days)`);
     runCleanup(); // Initial cleanup
     setInterval(runCleanup, CLEANUP_INTERVAL);
 }

@@ -15,9 +15,9 @@ if (ENABLE_CACHE) {
         const cache = require('./cache');
         subtitleCache = cache.subtitleCache;
         statsDB = cache.statsDB;
-        log('info', 'Subtitle cache enabled');
+        log('info', '[Server] Subtitle cache enabled');
     } catch (error) {
-        log('warn', `Cache disabled: ${error.message}`);
+        log('warn', `[Server] Cache disabled: ${error.message}`);
     }
 }
 
@@ -38,7 +38,7 @@ async function handleSubtitles(args, config) {
     try {
         // Parse the Stremio ID
         const parsed = parseStremioId(args.id);
-        log('debug', `Parsed ID: imdb=${parsed.imdbId}, season=${parsed.season}, episode=${parsed.episode}`);
+        log('debug', `[Subtitles] Parsed ID: imdb=${parsed.imdbId}, season=${parsed.season}, episode=${parsed.episode}`);
 
         // Get languages from config (supports both new and legacy format)
         const languages = config.languages || [];
@@ -49,6 +49,10 @@ async function handleSubtitles(args, config) {
                 languages.push(config.secondaryLang);
             }
         }
+
+        // Log incoming request
+        const sessionInfo = config.userId ? `session=${config.userId}` : 'no-session';
+        log('info', `[Request] ${parsed.type} ${parsed.imdbId}${parsed.season ? `:${parsed.season}:${parsed.episode}` : ''} langs=[${languages.join(',')}] ${sessionInfo}`);
 
         // Convert Stremio 3-letter codes to wyzie 2-letter
         const wyzieLanguages = languages.map(lang => mapStremioToWyzie(lang)).filter(Boolean);
@@ -77,7 +81,7 @@ async function handleSubtitles(args, config) {
             if (cachedSubtitles.length > 0) {
                 rawSubtitles = cachedSubtitles;
                 cacheHit = true;
-                log('info', `Cache HIT: ${cachedSubtitles.length} subtitles for ${wyzieLanguages.join(', ')}`);
+                log('info', `[Subtitles] Cache HIT: ${cachedSubtitles.length} subtitles for ${wyzieLanguages.join(', ')}`);
                 
                 if (needsRefresh) {
                     log('debug', 'Cache stale, triggering background refresh');
@@ -93,6 +97,7 @@ async function handleSubtitles(args, config) {
 
         // If no cache hit, fetch from providers
         if (!cacheHit) {
+            log('info', `[Subtitles] Cache MISS: fetching ${wyzieLanguages.join(', ')} from providers`);
             if (statsDB) {
                 statsDB.increment('cache_misses');
                 statsDB.recordDaily({ cacheMisses: 1 });
@@ -103,7 +108,7 @@ async function handleSubtitles(args, config) {
                 const result = await fetchSubtitlesFastFirstMulti(parsed, wyzieLanguages);
                 rawSubtitles = result.subtitles;
                 backgroundPromise = result.backgroundPromise;
-                log('info', `Fast-first multi-lang: got ${rawSubtitles.length} subtitles`);
+                log('info', `[Subtitles] Fast-first multi-lang: got ${rawSubtitles.length} subtitles`);
             } else {
                 // Legacy: fetch all at once
                 rawSubtitles = await fetchSubtitles(parsed);
@@ -321,12 +326,12 @@ function prioritizeSubtitlesMulti(subtitles, languages) {
         const info = languageMatch.byLanguage[lang];
         return `${lang}(${info.count})`;
     }).join(', ');
-    log('info', `Language matching: ${matchSummary}, others=${others.length}`);
+    log('info', `[Subtitles] Language matching: ${matchSummary}, others=${others.length}`);
     
     // Log warnings for missing languages
     for (const lang of languages) {
         if (!languageMatch.byLanguage[lang].found) {
-            log('warn', `Selected language "${lang}" not found in available subtitles`);
+            log('warn', `[Subtitles] Selected language "${lang}" not found in available subtitles`);
         }
     }
 
@@ -464,7 +469,7 @@ function cacheSubtitlesByLanguage(parsed, subtitles) {
         subtitleCache.set(parsed.imdbId, parsed.season, parsed.episode, lang, byLang[lang]);
     }
     
-    log('debug', `Cached subtitles for ${languages.length} languages: ${languages.join(', ')} (${subtitles.length} total)`);
+    log('info', `[Cache] Stored ${subtitles.length} subtitles across ${languages.length} languages for ${parsed.imdbId}`);
 }
 
 module.exports = {

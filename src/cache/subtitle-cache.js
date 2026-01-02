@@ -3,6 +3,7 @@
  * Simple caching layer for subtitle results
  */
 const db = require('./database');
+const { log } = require('../utils');
 
 // Default: 24 hours before triggering background refresh
 const REFRESH_INTERVAL = parseInt(process.env.CACHE_REFRESH_INTERVAL || '86400');
@@ -53,7 +54,7 @@ class SubtitleCache {
             
             return { subtitles, needsRefresh };
         } catch (error) {
-            console.error('[Cache] Get error:', error.message);
+            log('error', '[Cache] Get error:', error.message);
             return null;
         }
     }
@@ -108,9 +109,9 @@ class SubtitleCache {
             });
             
             insertMany(subtitles);
-            console.log(`[Cache] Stored ${subtitles.length} subtitles for ${imdbId} (${language})`);
+            log('debug', `[Cache] Stored ${subtitles.length} subtitles for ${imdbId} (${language})`);
         } catch (error) {
-            console.error('[Cache] Set error:', error.message);
+            log('error', '[Cache] Set error:', error.message);
         }
     }
     
@@ -133,7 +134,7 @@ class SubtitleCache {
             `);
             stmt.run(imdbId, season, season, episode, episode, language);
         } catch (error) {
-            console.error('[Cache] Touch error:', error.message);
+            log('error', '[Cache] Touch error:', error.message);
         }
     }
     
@@ -143,9 +144,9 @@ class SubtitleCache {
     clear() {
         try {
             db.prepare('DELETE FROM subtitle_cache').run();
-            console.log('[Cache] Cache cleared');
+            log('info', '[Cache] Cache cleared');
         } catch (error) {
-            console.error('[Cache] Clear error:', error.message);
+            log('error', '[Cache] Clear error:', error.message);
         }
     }
     
@@ -168,7 +169,7 @@ class SubtitleCache {
                 oldestAge: oldest.oldest ? Math.floor((Date.now() / 1000) - oldest.oldest) : 0
             };
         } catch (error) {
-            console.error('[Cache] GetStats error:', error.message);
+            log('error', '[Cache] GetStats error:', error.message);
             return { entries: 0, oldestAge: 0 };
         }
     }

@@ -65,7 +65,7 @@ class StatsDB {
             `);
             stmt.run(key, amount, amount);
         } catch (error) {
-            console.error('[StatsDB] Increment error:', error.message);
+            log('error', '[StatsDB] Increment error:', error.message);
         }
     }
     
@@ -80,7 +80,7 @@ class StatsDB {
             const row = stmt.get(key);
             return row ? row.stat_value : 0;
         } catch (error) {
-            console.error('[StatsDB] Get error:', error.message);
+            log('error', '[StatsDB] Get error:', error.message);
             return 0;
         }
     }
@@ -99,7 +99,7 @@ class StatsDB {
             }
             return result;
         } catch (error) {
-            console.error('[StatsDB] GetAll error:', error.message);
+            log('error', '[StatsDB] GetAll error:', error.message);
             return {};
         }
     }
@@ -138,7 +138,7 @@ class StatsDB {
                 data.series || 0
             );
         } catch (error) {
-            console.error('[StatsDB] RecordDaily error:', error.message);
+            log('error', '[StatsDB] RecordDaily error:', error.message);
         }
     }
     
@@ -156,7 +156,7 @@ class StatsDB {
             `);
             return stmt.all(days);
         } catch (error) {
-            console.error('[StatsDB] GetDailyStats error:', error.message);
+            log('error', '[StatsDB] GetDailyStats error:', error.message);
             return [];
         }
     }
@@ -181,7 +181,7 @@ class StatsDB {
                 data.responseTimeMs || 0
             );
         } catch (error) {
-            console.error('[StatsDB] LogRequest error:', error.message);
+            log('error', '[StatsDB] LogRequest error:', error.message);
         }
     }
     
@@ -199,7 +199,7 @@ class StatsDB {
             `);
             return stmt.all(limit);
         } catch (error) {
-            console.error('[StatsDB] GetRecentRequests error:', error.message);
+            log('error', '[StatsDB] GetRecentRequests error:', error.message);
             return [];
         }
     }
@@ -267,7 +267,7 @@ class StatsDB {
                 );
             }
         } catch (error) {
-            console.error('[StatsDB] RecordProviderStats error:', error.message);
+            log('error', '[StatsDB] RecordProviderStats error:', error.message);
         }
     }
     
@@ -294,7 +294,7 @@ class StatsDB {
             `);
             return stmt.all(days);
         } catch (error) {
-            console.error('[StatsDB] GetProviderStats error:', error.message);
+            log('error', '[StatsDB] GetProviderStats error:', error.message);
             return [];
         }
     }
@@ -329,7 +329,7 @@ class StatsDB {
                 data.found ? 0 : 1
             );
         } catch (error) {
-            console.error('[StatsDB] RecordLanguageStats error:', error.message);
+            log('error', '[StatsDB] RecordLanguageStats error:', error.message);
         }
     }
     
@@ -355,7 +355,7 @@ class StatsDB {
             `);
             return stmt.all(days);
         } catch (error) {
-            console.error('[StatsDB] GetLanguageStats error:', error.message);
+            log('error', '[StatsDB] GetLanguageStats error:', error.message);
             return [];
         }
     }
@@ -402,7 +402,7 @@ class StatsDB {
             
             return { primary, secondary, combined: { rate: combinedRate, found: combinedFound, total: combinedTotal } };
         } catch (error) {
-            console.error('[StatsDB] GetLanguageMatchSummary error:', error.message);
+            log('error', '[StatsDB] GetLanguageMatchSummary error:', error.message);
             return { 
                 primary: { found: 0, notFound: 0, rate: 0 }, 
                 secondary: { found: 0, notFound: 0, rate: 0 }, 
@@ -437,7 +437,7 @@ class StatsDB {
             });
             return result;
         } catch (error) {
-            console.error('[StatsDB] GetTopSuccessfulLanguages error:', error.message);
+            log('error', '[StatsDB] GetTopSuccessfulLanguages error:', error.message);
             return {};
         }
     }
@@ -500,7 +500,7 @@ class StatsDB {
                 misses: hitRate.misses
             };
         } catch (error) {
-            console.error('[StatsDB] GetCacheStats error:', error.message);
+            log('error', '[StatsDB] GetCacheStats error:', error.message);
             return {
                 entries: 0,
                 uniqueContent: 0,
@@ -542,7 +542,7 @@ class StatsDB {
             
             return { items, total, page, limit };
         } catch (error) {
-            console.error('[StatsDB] GetContentCacheSummary error:', error.message);
+            log('error', '[StatsDB] GetContentCacheSummary error:', error.message);
             return { items: [], total: 0, page, limit };
         }
     }

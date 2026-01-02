@@ -80,25 +80,37 @@ class ProviderManager {
         log('debug', `[ProviderManager] Searching ${enabledProviders.length} provider(s): ${enabledProviders.map(p => p.name).join(', ')}`);
 
         // Query all providers in parallel
+        const startTime = Date.now();
         const results = await Promise.allSettled(
             enabledProviders.map(provider => provider.search(query))
         );
+        const totalTime = Date.now() - startTime;
 
         // Aggregate results from all providers
         const allSubtitles = [];
+        const providerSummary = [];
+        let successCount = 0;
+        let failCount = 0;
         
         results.forEach((result, index) => {
             const provider = enabledProviders[index];
             
             if (result.status === 'fulfilled') {
                 allSubtitles.push(...result.value);
+                successCount++;
+                providerSummary.push(`${provider.name}:${result.value.length}✓`);
                 log('debug', `[ProviderManager] ${provider.name}: ${result.value.length} subtitles`);
             } else {
+                failCount++;
+                providerSummary.push(`${provider.name}:✗`);
                 log('error', `[ProviderManager] ${provider.name} failed: ${result.reason?.message || 'Unknown error'}`);
             }
         });
 
         log('debug', `[ProviderManager] Total aggregated: ${allSubtitles.length} subtitles`);
+        
+        // Synthesized INFO log for production monitoring
+        log('info', `[Providers] ${successCount}/${enabledProviders.length} ok (${totalTime}ms) - ${providerSummary.join(', ')}`);
         
         return allSubtitles;
     }

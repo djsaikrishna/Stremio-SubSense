@@ -5,6 +5,7 @@
 const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
+const { log } = require('../utils');
 
 // Database path - defaults to ./data/subsense.db
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, '../../data/subsense.db');
@@ -13,12 +14,12 @@ const DB_PATH = process.env.DB_PATH || path.join(__dirname, '../../data/subsense
 const dataDir = path.dirname(DB_PATH);
 if (!fs.existsSync(dataDir)) {
     fs.mkdirSync(dataDir, { recursive: true });
-    console.log(`[Cache] Created data directory: ${dataDir}`);
+    log('info', `[Cache] Created data directory: ${dataDir}`);
 }
 
 // Create/open database
 const db = new Database(DB_PATH);
-console.log(`[Cache] Database opened: ${DB_PATH}`);
+log('info', `[Cache] Database opened: ${DB_PATH}`);
 
 // Enable WAL mode for better concurrent access
 db.pragma('journal_mode = WAL');
@@ -171,6 +172,6 @@ ORDER BY last_updated DESC;
 `;
 
 db.exec(schema);
-console.log('[Cache] Database schema initialized');
+log('info', '[Cache] Database schema initialized');
 
 module.exports = db;
