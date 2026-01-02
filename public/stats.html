@@ -78,7 +78,7 @@
 
         <div class="card">
             <h2>🗄️ Cache Performance</h2>
-            <div class="stats-grid" style="grid-template-columns: repeat(5, 1fr);">
+            <div class="stats-grid grid-5">
                 <div class="stat-card">
                     <div class="value" id="cacheHitRate">0%</div>
                     <div class="label">Hit Rate</div>
@@ -100,11 +100,11 @@
                     <div class="label">Database Size</div>
                 </div>
             </div>
-            <div style="margin-top: 12px; display: flex; gap: 16px; align-items: center;">
-                <div style="flex: 1; background: rgba(74, 144, 226, 0.2); border-radius: 8px; height: 12px; overflow: hidden;">
-                    <div id="cacheHitBar" style="height: 100%; background: linear-gradient(90deg, #4A90E2, #6BA5E7); width: 0%; transition: width 0.5s ease;"></div>
+            <div class="cache-bar-container">
+                <div class="cache-bar-track">
+                    <div class="cache-bar-fill" id="cacheHitBar"></div>
                 </div>
-                <span style="color: var(--color-text-secondary); font-size: 0.9rem;">
+                <span class="cache-bar-label">
                     <span id="cacheHits">0</span> hits / <span id="cacheMisses">0</span> misses
                 </span>
             </div>
@@ -133,7 +133,7 @@
 
         <div class="card">
             <h2>🎯 Language Matching</h2>
-            <div class="stats-grid" style="grid-template-columns: repeat(2, 1fr);">
+            <div class="stats-grid grid-2">
                 <div class="stat-card">
                     <div class="value" id="anyPreferredRate">0%</div>
                     <div class="label">At Least One Preferred Found</div>
