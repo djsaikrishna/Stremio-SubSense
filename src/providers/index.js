@@ -29,19 +29,40 @@
 const { BaseProvider, SubtitleResult } = require('./BaseProvider');
 const { ProviderManager, providerManager } = require('./ProviderManager');
 const WyzieProvider = require('./WyzieProvider');
+const BetaSeriesProvider = require('./BetaSeriesProvider');
+
+/**
+ * Check if a provider is enabled in SUBTITLE_SOURCES
+ * @param {string} providerName - Name of the provider to check
+ * @returns {boolean} - Whether provider is enabled
+ */
+function isProviderEnabled(providerName) {
+    const sources = process.env.SUBTITLE_SOURCES;
+    if (!sources) {
+        // If no sources specified, enable all providers
+        return true;
+    }
+    const sourceList = sources.split(',').map(s => s.trim().toLowerCase());
+    return sourceList.includes(providerName.toLowerCase());
+}
 
 // Initialize default providers
 function initializeDefaultProviders() {
-    // Only register if not already registered
-    if (!providerManager.get('wyzie')) {
+    if (!providerManager.get('wyzie') && isProviderEnabled('wyzie')) {
         providerManager.register(new WyzieProvider());
+    }
+    
+    if (!providerManager.get('betaseries') && isProviderEnabled('betaseries')) {
+        if (process.env.BETASERIES_API_KEY) {
+            providerManager.register(new BetaSeriesProvider());
+        }
     }
 }
 
-// Auto-initialize on module load
 initializeDefaultProviders();
 
 module.exports = {
     providerManager,
-    WyzieProvider
+    WyzieProvider,
+    BetaSeriesProvider
 };

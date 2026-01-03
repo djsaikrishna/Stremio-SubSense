@@ -18,6 +18,7 @@
   "license": "MIT",
   "dependencies": {
     "@cospired/i18n-iso-languages": "^4.2.0",
+    "adm-zip": "^0.5.16",
     "ass-compiler": "^0.1.16",
     "better-sqlite3": "^12.5.0",
     "dotenv": "^16.3.1",

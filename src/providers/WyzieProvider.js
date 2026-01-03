@@ -20,10 +20,10 @@ const { searchSubtitles } = require('wyzie-lib');
 const { BaseProvider, SubtitleResult } = require('./BaseProvider');
 const { log } = require('../utils');
 
-// Default sources if not configured (includes gestdown)
+// Default sources if not configured
 const DEFAULT_SOURCES = ['OpenSubtitles', 'Subdl', 'Subf2m', 'Podnapisi', 'AnimeTosho', 'Gestdown'];
 
-// Fast-first configuration (can be made configurable later)
+// Fast-first configuration 
 const FAST_FIRST_CONFIG = {
     minSubtitles: 1,  // Return when we have at least X subtitles
     enabled: true     // Enable fast-first strategy
@@ -52,13 +52,18 @@ class WyzieProvider extends BaseProvider {
 
     /**
      * Get sources from environment variable
+     * Uses WYZIE_SOURCES if set, otherwise uses DEFAULT_SOURCES
      * @private
      */
     _getSourcesFromEnv() {
-        const envSources = process.env.SUBTITLE_SOURCES;
+        const envSources = process.env.WYZIE_SOURCES;
         if (envSources) {
-            return envSources.split(',').map(s => s.trim().toLowerCase()).filter(s => s);
+            const sources = envSources.split(',').map(s => s.trim()).filter(s => s);
+            log('debug', `[WyzieProvider] Using sources from WYZIE_SOURCES: ${sources.join(', ')}`);
+            return sources;
         }
+        // Fall back to DEFAULT_SOURCES
+        log('debug', `[WyzieProvider] Using default sources: ${DEFAULT_SOURCES.join(', ')}`);
         return DEFAULT_SOURCES;
     }
 

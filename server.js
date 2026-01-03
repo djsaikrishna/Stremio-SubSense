@@ -276,6 +276,228 @@ app.get('/manifest.json', (req, res) => {
     res.json(manifest);
 });
 
+// =====================================================
+// BetaSeries Subtitle Proxy Endpoint
+// =====================================================
+
+/**
+ * BetaSeries subtitle proxy - handles ZIP extraction for BetaSeries subtitles
+ * URL format: /api/betaseries/proxy/:subtitleId?lang=vo|vf
+ * 
+ * This endpoint:
+ * 1. Fetches the subtitle from BetaSeries
+ * 2. If it's a ZIP file, extracts the SRT matching the requested language
+ * 3. Caches the result for subsequent requests
+ * 4. Returns the SRT content directly
+ */
+let AdmZip = null;
+try {
+    AdmZip = require('adm-zip');
+} catch (e) {
+    log('warn', 'adm-zip not installed - BetaSeries ZIP extraction disabled');
+}
+
+// Simple in-memory cache for extracted subtitles (with TTL)
+const betaseriesSubtitleCache = new Map();
+const BETASERIES_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours
+
+function cleanBetaseriesCache() {
+    const now = Date.now();
+    for (const [key, value] of betaseriesSubtitleCache.entries()) {
+        if (now - value.timestamp > BETASERIES_CACHE_TTL) {
+            betaseriesSubtitleCache.delete(key);
+        }
+    }
+}
+// Clean cache every hour
+setInterval(cleanBetaseriesCache, 60 * 60 * 1000);
+
+app.get('/api/betaseries/proxy/:subtitleId', async (req, res) => {
+    const { subtitleId } = req.params;
+    const lang = req.query.lang || 'vo'; // Default to Original Version (English)
+    
+    const cacheKey = `${subtitleId}:${lang}`;
+    
+    log('debug', `[BetaSeries Proxy] Request: subtitleId=${subtitleId}, lang=${lang}`);
+    
+    try {
+        // Check cache first
+        const cached = betaseriesSubtitleCache.get(cacheKey);
+        if (cached && Date.now() - cached.timestamp < BETASERIES_CACHE_TTL) {
+            log('debug', `[BetaSeries Proxy] Cache HIT for ${cacheKey}`);
+            res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.setHeader('X-BetaSeries-Cache', 'hit');
+            return res.send(cached.content);
+        }
+        
+        // Fetch from BetaSeries
+        const betaseriesUrl = `https://www.betaseries.com/srt/${subtitleId}`;
+        log('debug', `[BetaSeries Proxy] Fetching: ${betaseriesUrl}`);
+        
+        const response = await fetch(betaseriesUrl, {
+            headers: { 'User-Agent': 'SubSense-Stremio/1.0' }
+        });
+        
+        if (!response.ok) {
+            log('error', `[BetaSeries Proxy] Fetch failed: ${response.status}`);
+            return res.status(response.status).send('Failed to fetch subtitle');
+        }
+        
+        const buffer = Buffer.from(await response.arrayBuffer());
+        let srtContent;
+        
+        // Check if it's a ZIP file (PK signature)
+        const isZip = buffer.length >= 2 && buffer[0] === 0x50 && buffer[1] === 0x4b;
+        
+        let originalFormat = 'srt';
+        
+        if (isZip) {
+            if (!AdmZip) {
+                log('error', '[BetaSeries Proxy] ZIP file received but adm-zip not installed');
+                return res.status(500).send('ZIP extraction not available');
+            }
+            
+            log('debug', `[BetaSeries Proxy] Extracting ZIP file (${buffer.length} bytes)`);
+            
+            try {
+                const zip = new AdmZip(buffer);
+                const entries = zip.getEntries();
+                
+                // Define subtitle file extensions we support
+                const isSubtitleFile = (name) => {
+                    const lower = name.toLowerCase();
+                    return (lower.endsWith('.srt') || lower.endsWith('.ass') || lower.endsWith('.ssa')) 
+                           && !name.startsWith('._'); // Skip macOS resource forks
+                };
+                
+                // Language patterns for matching
+                const langPatterns = {
+                    'vf': ['.vf.', '.fr.', 'french', 'fra', '_vf', '-vf'],
+                    'vo': ['.vo.', '.en.', 'english', 'eng', '_vo', '-vo', '_en', '-en']
+                };
+                
+                const patterns = langPatterns[lang] || langPatterns['vo'];
+                
+                // Collect all subtitle files categorized
+                const srtFiles = [];
+                const assFiles = [];
+                
+                for (const entry of entries) {
+                    const name = entry.entryName.toLowerCase();
+                    if (isSubtitleFile(name)) {
+                        if (name.endsWith('.srt')) {
+                            srtFiles.push(entry);
+                        } else if (name.endsWith('.ass') || name.endsWith('.ssa')) {
+                            assFiles.push(entry);
+                        }
+                    }
+                }
+                
+                log('debug', `[BetaSeries Proxy] Found ${srtFiles.length} SRT, ${assFiles.length} ASS files`);
+                
+                // Priority: Language-matching SRT > Any SRT > Language-matching ASS > Any ASS
+                let targetEntry = null;
+                
+                // 1. Try language-specific SRT
+                for (const entry of srtFiles) {
+                    const name = entry.entryName.toLowerCase();
+                    if (patterns.some(p => name.includes(p))) {
+                        targetEntry = entry;
+                        originalFormat = 'srt';
+                        break;
+                    }
+                }
+                
+                // 2. Try any SRT
+                if (!targetEntry && srtFiles.length > 0) {
+                    targetEntry = srtFiles[0];
+                    originalFormat = 'srt';
+                }
+                
+                // 3. Try language-specific ASS
+                if (!targetEntry) {
+                    for (const entry of assFiles) {
+                        const name = entry.entryName.toLowerCase();
+                        if (patterns.some(p => name.includes(p))) {
+                            targetEntry = entry;
+                            originalFormat = 'ass';
+                            break;
+                        }
+                    }
+                }
+                
+                // 4. Try any ASS
+                if (!targetEntry && assFiles.length > 0) {
+                    targetEntry = assFiles[0];
+                    originalFormat = 'ass';
+                }
+                
+                if (!targetEntry) {
+                    log('error', '[BetaSeries Proxy] No subtitle file (SRT/ASS) found in ZIP');
+                    return res.status(404).send('No subtitle file found in archive');
+                }
+                
+                log('debug', `[BetaSeries Proxy] Extracted: ${targetEntry.entryName} (format: ${originalFormat})`);
+                const extractedContent = targetEntry.getData().toString('utf-8');
+                
+                // If ASS file, convert to SRT
+                if (originalFormat === 'ass') {
+                    log('debug', `[BetaSeries Proxy] Converting ASS to SRT...`);
+                    const result = convertToSrt(extractedContent);
+                    srtContent = result.srt;
+                    log('info', `[BetaSeries Proxy] Converted ${result.captionCount} captions from ASS to SRT`);
+                } else {
+                    srtContent = extractedContent;
+                }
+                
+            } catch (zipError) {
+                log('error', `[BetaSeries Proxy] ZIP extraction error: ${zipError.message}`);
+                return res.status(500).send('Failed to extract subtitle from archive');
+            }
+            
+        } else {
+            // Not a ZIP, check if it's ASS or SRT content
+            const rawContent = buffer.toString('utf-8');
+            
+            if (isAssFormat(rawContent)) {
+                log('debug', `[BetaSeries Proxy] Direct ASS file detected, converting...`);
+                originalFormat = 'ass';
+                const result = convertToSrt(rawContent);
+                srtContent = result.srt;
+                log('info', `[BetaSeries Proxy] Converted ${result.captionCount} captions from ASS to SRT`);
+            } else {
+                originalFormat = 'srt';
+                srtContent = rawContent;
+                log('debug', `[BetaSeries Proxy] Direct SRT file (${srtContent.length} chars)`);
+            }
+        }
+        
+        // Cache the result
+        betaseriesSubtitleCache.set(cacheKey, {
+            content: srtContent,
+            originalFormat: originalFormat,
+            timestamp: Date.now()
+        });
+        log('debug', `[BetaSeries Proxy] Cached: ${cacheKey}`);
+        
+        // Return the SRT content
+        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('X-BetaSeries-Cache', 'miss');
+        res.setHeader('X-BetaSeries-Extracted', isZip ? 'yes' : 'no');
+        res.setHeader('X-BetaSeries-Original-Format', originalFormat);
+        if (originalFormat === 'ass') {
+            res.setHeader('X-BetaSeries-Converted', 'yes');
+        }
+        res.send(srtContent);
+        
+    } catch (error) {
+        log('error', `[BetaSeries Proxy] Error: ${error.message}`);
+        res.status(500).send(`BetaSeries proxy error: ${error.message}`);
+    }
+});
+
 /**
  * Subtitle proxy endpoint - converts ASS/SSA to SRT on the fly OR passes through as-is
  * URL format: /api/subtitle/:format/{encoded_original_url}

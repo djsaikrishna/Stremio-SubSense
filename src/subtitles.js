@@ -202,6 +202,7 @@ async function handleSubtitles(args, config) {
 
 /**
  * Fetch subtitles using multi-language fast-first parallel strategy
+ * Calls ALL enabled providers in parallel, combining results
  * @param {Object} parsed - Parsed Stremio ID
  * @param {Array<string>} languages - Array of language codes (2-letter)
  * @returns {Object} { subtitles, fromCache, backgroundPromise }
@@ -210,28 +211,89 @@ async function fetchSubtitlesFastFirstMulti(parsed, languages) {
     const query = {
         imdbId: parsed.imdbId,
         season: parsed.season,
-        episode: parsed.episode
+        episode: parsed.episode,
+        language: languages[0] // Primary language for providers that need it
     };
 
+    const enabledProviders = providerManager.getEnabled();
     const wyzieProvider = providerManager.get('wyzie');
-    if (!wyzieProvider) {
-        log('debug', 'Wyzie provider not available, using regular search');
-        const subtitles = await providerManager.searchAll(query);
-        return { subtitles, fromCache: false, backgroundPromise: null };
-    }
-
-    // Use multi-language fast-first if available
-    if (wyzieProvider.searchFastFirstMulti) {
-        return await wyzieProvider.searchFastFirstMulti(query, languages);
+    const otherProviders = enabledProviders.filter(p => p.name !== 'wyzie');
+    
+    log('debug', `[Subtitles] Fetching from ${enabledProviders.length} providers: ${enabledProviders.map(p => p.name).join(', ')}`);
+    
+    // Build promises for all providers
+    const providerPromises = [];
+    const providerNames = [];
+    
+    // Wyzie uses fast-first if available
+    if (wyzieProvider && wyzieProvider.enabled) {
+        if (wyzieProvider.searchFastFirstMulti) {
+            providerPromises.push(wyzieProvider.searchFastFirstMulti(query, languages));
+            providerNames.push('wyzie');
+        } else if (wyzieProvider.searchFastFirst && languages.length > 0) {
+            providerPromises.push(wyzieProvider.searchFastFirst(query, languages[0], languages[1] || null));
+            providerNames.push('wyzie');
+        } else {
+            providerPromises.push(wyzieProvider.search(query));
+            providerNames.push('wyzie');
+        }
     }
     
-    // Fallback to legacy fast-first with first two languages
-    if (wyzieProvider.searchFastFirst && languages.length > 0) {
-        return await wyzieProvider.searchFastFirst(query, languages[0], languages[1] || null);
+    // Other providers use regular search (e.g., BetaSeries)
+    for (const provider of otherProviders) {
+        // Create language-specific queries for each requested language
+        for (const lang of languages) {
+            const langQuery = { ...query, language: lang };
+            providerPromises.push(provider.search(langQuery));
+            providerNames.push(`${provider.name}(${lang})`);
+        }
     }
-
-    const subtitles = await providerManager.searchAll(query);
-    return { subtitles, fromCache: false, backgroundPromise: null };
+    
+    if (providerPromises.length === 0) {
+        log('warn', '[Subtitles] No providers available');
+        return { subtitles: [], fromCache: false, backgroundPromise: null };
+    }
+    
+    // Execute all providers in parallel
+    const startTime = Date.now();
+    const results = await Promise.allSettled(providerPromises);
+    const totalTime = Date.now() - startTime;
+    
+    // Aggregate results
+    let allSubtitles = [];
+    let backgroundPromise = null;
+    const summary = [];
+    
+    results.forEach((result, index) => {
+        const providerName = providerNames[index];
+        
+        if (result.status === 'fulfilled') {
+            const value = result.value;
+            
+            // Handle Wyzie's fast-first response format
+            if (value && value.subtitles) {
+                allSubtitles.push(...value.subtitles);
+                summary.push(`${providerName}:${value.subtitles.length}✓`);
+                // Capture background promise if present
+                if (value.backgroundPromise && !backgroundPromise) {
+                    backgroundPromise = value.backgroundPromise;
+                }
+            } else if (Array.isArray(value)) {
+                // Standard provider response
+                allSubtitles.push(...value);
+                summary.push(`${providerName}:${value.length}✓`);
+            } else {
+                summary.push(`${providerName}:0✓`);
+            }
+        } else {
+            summary.push(`${providerName}:✗`);
+            log('debug', `[Subtitles] ${providerName} failed: ${result.reason?.message || 'Unknown'}`);
+        }
+    });
+    
+    log('info', `[Subtitles] Multi-provider: ${allSubtitles.length} total in ${totalTime}ms (${summary.join(', ')})`);
+    
+    return { subtitles: allSubtitles, fromCache: false, backgroundPromise };
 }
 
 /**
