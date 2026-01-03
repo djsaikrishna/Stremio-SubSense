@@ -172,6 +172,106 @@ app.get('/api/stats/daily', (req, res) => {
     }
 });
 
+/**
+ * Active sessions history API
+ * Returns: active session counts for different time ranges
+ * Shows users active in each time window
+ * @param days - Number of days (1, 3, 7, 14, 30, 60)
+ */
+app.get('/api/stats/sessions', (req, res) => {
+    try {
+        if (!statsDB) {
+            return res.status(503).json({ error: 'Cache system not available' });
+        }
+        const requestedDays = parseInt(req.query.days, 10) || 30;
+        const allowedDays = [1, 3, 7, 14, 30, 60];
+        const days = allowedDays.includes(requestedDays) ? requestedDays : 30;
+        
+        // Get active users count for the specified period (cumulative for header)
+        const activeCount = statsDB.getActiveUsersCount(days);
+        
+        // Helper to format date as "Jan 3" or "Jan 3, 12:00"
+        const formatDate = (date, includeTime = false) => {
+            const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+            const month = months[date.getMonth()];
+            const day = date.getDate();
+            if (includeTime) {
+                const hours = date.getHours().toString().padStart(2, '0');
+                return `${month} ${day}, ${hours}:00`;
+            }
+            return `${month} ${day}`;
+        };
+        
+        // Helper to get midnight of a date (start of day)
+        const getMidnight = (date) => {
+            const d = new Date(date);
+            d.setHours(0, 0, 0, 0);
+            return Math.floor(d.getTime() / 1000);
+        };
+        
+        // Breakdown for charting (point-in-time counts for each window)
+        const breakdown = {
+            days: days,
+            activeUsers: activeCount,
+            intervals: []
+        };
+        
+        const now = new Date();
+        
+        // Create interval data points for the chart
+        if (days === 1) {
+            // For 1 day: every 2 hours windows (rolling), oldest to newest
+            const windows = [];
+            for (let h = 24; h > 0; h -= 2) {
+                windows.push({ start: h, end: h - 2 });
+            }
+            for (const w of windows) {
+                const pointDate = new Date(now.getTime() - w.start * 60 * 60 * 1000);
+                breakdown.intervals.push({
+                    label: formatDate(pointDate, true),
+                    value: statsDB.getActiveUsersInWindow(w.start / 24, w.end / 24)
+                });
+            }
+        } else if (days === 3) {
+            // For 3 days: every 6 hours windows (rolling), oldest to newest
+            for (let h = 72; h > 0; h -= 6) {
+                const pointDate = new Date(now.getTime() - h * 60 * 60 * 1000);
+                breakdown.intervals.push({
+                    label: formatDate(pointDate, true),
+                    value: statsDB.getActiveUsersInWindow(h / 24, (h - 6) / 24)
+                });
+            }
+        } else {
+            // For 7/14/30/60 days: use calendar days (midnight to midnight)
+            const today = new Date(now);
+            today.setHours(0, 0, 0, 0); // Start of today
+            
+            // Calculate number of days to show
+            const daysToShow = days;
+            
+            // Generate daily points from oldest to today
+            for (let d = daysToShow - 1; d >= 0; d--) {
+                const dayStart = new Date(today.getTime() - d * 24 * 60 * 60 * 1000);
+                const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
+                
+                const startTs = getMidnight(dayStart);
+                const endTs = getMidnight(dayEnd);
+                
+                const isToday = d === 0;
+                breakdown.intervals.push({
+                    label: isToday ? formatDate(dayStart) + ' (today)' : formatDate(dayStart),
+                    value: statsDB.getActiveUsersOnDay(startTs, endTs)
+                });
+            }
+        }
+        
+        res.json(breakdown);
+    } catch (error) {
+        log('error', `API /stats/sessions error: ${error.message}`);
+        res.status(500).json({ error: 'Failed to get session stats' });
+    }
+});
+
 // =====================================================
 // Content Cache Browser Endpoints
 // =====================================================

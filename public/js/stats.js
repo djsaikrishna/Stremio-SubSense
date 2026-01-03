@@ -5,6 +5,7 @@
 let sourceChart = null;
 let langChart = null;
 let timingChart = null;
+let sessionsChart = null;
 let refreshInterval = null;
 
 const REFRESH_INTERVAL_MS = 30000;
@@ -143,9 +144,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     fetchVersion();
     await loadLanguageLookup();
     initCharts();
+    initSessionsChart();
     setupLimitSelector();
     setupLangSelector();
+    setupSessionsPeriodSelector();
     loadStats();
+    loadSessionsStats();
     setupAutoRefresh();
 });
 
@@ -838,5 +842,139 @@ async function loadProviderStats() {
         
     } catch (error) {
         console.error('Failed to load provider stats:', error);
+    }
+}
+
+function initSessionsChart() {
+    const ctx = document.getElementById('sessionsChart');
+    if (!ctx) return;
+    
+    const sessionsGradient = ctx.getContext('2d').createLinearGradient(0, 0, 0, 250);
+    sessionsGradient.addColorStop(0, 'rgba(155, 89, 182, 0.4)');
+    sessionsGradient.addColorStop(1, 'rgba(155, 89, 182, 0.02)');
+    
+    sessionsChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: [],
+            datasets: [{
+                label: 'Active Users',
+                data: [],
+                borderColor: '#9B59B6',
+                backgroundColor: sessionsGradient,
+                fill: true,
+                tension: 0.4,
+                borderWidth: 3,
+                pointBackgroundColor: '#9B59B6',
+                pointBorderColor: '#0C1226',
+                pointBorderWidth: 2,
+                pointRadius: 4,
+                pointHoverRadius: 6,
+                pointHoverBackgroundColor: '#B07CC6',
+                pointHoverBorderColor: '#fff'
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: {
+                intersect: false,
+                mode: 'index'
+            },
+            animation: {
+                duration: 400
+            },
+            plugins: {
+                legend: {
+                    display: false
+                },
+                tooltip: {
+                    backgroundColor: 'rgba(26, 34, 63, 0.95)',
+                    titleColor: '#E8EDF5',
+                    bodyColor: '#9CA8C8',
+                    borderColor: 'rgba(155, 89, 182, 0.3)',
+                    borderWidth: 1,
+                    padding: 12,
+                    cornerRadius: 8,
+                    callbacks: {
+                        label: function(context) {
+                            const value = context.raw;
+                            return ` ${value.toLocaleString()} active user${value !== 1 ? 's' : ''}`;
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    ticks: { 
+                        color: '#9CA8C8',
+                        font: { size: 11 }
+                    },
+                    grid: { 
+                        color: 'rgba(155, 89, 182, 0.1)',
+                        drawBorder: false
+                    }
+                },
+                y: {
+                    beginAtZero: true,
+                    ticks: { 
+                        color: '#9CA8C8',
+                        font: { size: 11 },
+                        stepSize: 1,
+                        callback: function(value) {
+                            if (Math.floor(value) === value) {
+                                return value;
+                            }
+                        }
+                    },
+                    grid: { 
+                        color: 'rgba(155, 89, 182, 0.1)',
+                        drawBorder: false
+                    }
+                }
+            }
+        }
+    });
+}
+
+function setupSessionsPeriodSelector() {
+    const selector = document.getElementById('sessionsPeriod');
+    
+    if (!selector) return;
+    
+    selector.addEventListener('change', () => {
+        loadSessionsStats();
+    });
+}
+
+async function loadSessionsStats() {
+    try {
+        const days = document.getElementById('sessionsPeriod')?.value || 30;
+        const response = await fetch(`/api/stats/sessions?days=${days}`);
+        
+        if (!response.ok) {
+            console.log('Sessions stats not available');
+            return;
+        }
+        
+        const data = await response.json();
+        
+        if (!sessionsChart || !data.intervals || data.intervals.length === 0) {
+            console.log('No sessions data to display');
+            return;
+        }
+        
+        sessionsChart.data.labels = data.intervals.map(i => i.label);
+        sessionsChart.data.datasets[0].data = data.intervals.map(i => i.value);
+        sessionsChart.update();
+        
+        setTimeout(() => {
+            if (sessionsChart) {
+                sessionsChart.resize();
+            }
+        }, 100);
+        
+    } catch (error) {
+        console.error('Failed to load sessions stats:', error);
     }
 }

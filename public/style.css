@@ -979,6 +979,46 @@ label {
     color: var(--color-text-primary);
 }
 
+/* Sessions Period Selector */
+.sessions-period-selector {
+    display: flex;
+    align-items: center;
+}
+
+.period-select {
+    padding: 8px 32px 8px 14px;
+    background: rgba(12, 18, 38, 0.5);
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    color: var(--color-text-primary);
+    font-size: 0.85rem;
+    font-family: inherit;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%239CA8C8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+}
+
+.period-select:hover {
+    border-color: var(--color-accent-blue);
+    background-color: rgba(42, 53, 85, 0.5);
+}
+
+.period-select:focus {
+    outline: none;
+    border-color: var(--color-accent-blue);
+    box-shadow: 0 0 0 2px rgba(74, 144, 226, 0.2);
+}
+
+.period-select option {
+    background: var(--color-dark-blue-bg);
+    color: var(--color-text-primary);
+    padding: 8px;
+}
+
 .charts-row {
     display: grid;
     grid-template-columns: 1fr 1fr;

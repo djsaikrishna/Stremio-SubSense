@@ -48,6 +48,18 @@ const getActiveUsersCountStmt = db.prepare(`
     WHERE last_active > strftime('%s', 'now') - ?
 `);
 
+// Get users active within a specific time window (between startSeconds and endSeconds ago)
+const getActiveUsersInWindowStmt = db.prepare(`
+    SELECT COUNT(*) as count FROM user_tracking 
+    WHERE last_active <= ? AND last_active > ?
+`);
+
+// Get users active on a specific calendar day (using absolute timestamps)
+const getActiveUsersOnDayStmt = db.prepare(`
+    SELECT COUNT(*) as count FROM user_tracking 
+    WHERE last_active >= ? AND last_active < ?
+`);
+
 class StatsDB {
     /**
      * Increment a statistic counter
@@ -764,6 +776,41 @@ class StatsDB {
             return result?.count || 0;
         } catch (error) {
             log('error', `Failed to get active sessions count: ${error.message}`);
+            return 0;
+        }
+    }
+    
+    /**
+     * Get count of users active within a specific time window
+     * @param {number} startDaysAgo - Start of window (days ago from now)
+     * @param {number} endDaysAgo - End of window (days ago from now)
+     * @returns {number} Count of users active in that window
+     */
+    getActiveUsersInWindow(startDaysAgo, endDaysAgo) {
+        try {
+            const nowSeconds = Math.floor(Date.now() / 1000);
+            const windowStart = nowSeconds - (startDaysAgo * 24 * 60 * 60);
+            const windowEnd = nowSeconds - (endDaysAgo * 24 * 60 * 60);
+            const result = getActiveUsersInWindowStmt.get(windowEnd, windowStart);
+            return result?.count || 0;
+        } catch (error) {
+            log('error', `Failed to get active users in window: ${error.message}`);
+            return 0;
+        }
+    }
+    
+    /**
+     * Get count of users active on a specific calendar day (midnight to midnight)
+     * @param {number} startTimestamp - Start of day (midnight) in Unix seconds
+     * @param {number} endTimestamp - End of day (next midnight) in Unix seconds
+     * @returns {number} Count of users active on that day
+     */
+    getActiveUsersOnDay(startTimestamp, endTimestamp) {
+        try {
+            const result = getActiveUsersOnDayStmt.get(startTimestamp, endTimestamp);
+            return result?.count || 0;
+        } catch (error) {
+            log('error', `Failed to get active users on day: ${error.message}`);
             return 0;
         }
     }
