@@ -30,6 +30,8 @@ const { BaseProvider, SubtitleResult } = require('./BaseProvider');
 const { ProviderManager, providerManager } = require('./ProviderManager');
 const WyzieProvider = require('./WyzieProvider');
 const BetaSeriesProvider = require('./BetaSeriesProvider');
+const YIFYProvider = require('./YIFYProvider');
+const TVsubtitlesProvider = require('./TVsubtitlesProvider');
 
 /**
  * Check if a provider is enabled in SUBTITLE_SOURCES
@@ -57,6 +59,16 @@ function initializeDefaultProviders() {
             providerManager.register(new BetaSeriesProvider());
         }
     }
+    
+    // YIFY provider for movie subtitles
+    if (!providerManager.get('yify') && isProviderEnabled('yify')) {
+        providerManager.register(new YIFYProvider());
+    }
+    
+    // TVsubtitles provider for TV series subtitles
+    if (!providerManager.get('tvsubtitles') && isProviderEnabled('tvsubtitles')) {
+        providerManager.register(new TVsubtitlesProvider());
+    }
 }
 
 initializeDefaultProviders();
@@ -64,5 +76,7 @@ initializeDefaultProviders();
 module.exports = {
     providerManager,
     WyzieProvider,
-    BetaSeriesProvider
+    BetaSeriesProvider,
+    YIFYProvider,
+    TVsubtitlesProvider
 };

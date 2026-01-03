@@ -8,6 +8,7 @@ const { generateManifest } = require('./manifest');
 const statsService = require('./src/stats');
 const { log } = require('./src/utils');
 const { convertToSrt, isAssFormat } = require('./src/services/subtitle-converter');
+const { bufferToUtf8 } = require('./src/utils/encoding');
 
 const app = express();
 const PORT = process.env.PORT || 3100;
@@ -439,7 +440,7 @@ app.get('/api/betaseries/proxy/:subtitleId', async (req, res) => {
                 }
                 
                 log('debug', `[BetaSeries Proxy] Extracted: ${targetEntry.entryName} (format: ${originalFormat})`);
-                const extractedContent = targetEntry.getData().toString('utf-8');
+                const extractedContent = bufferToUtf8(targetEntry.getData());
                 
                 // If ASS file, convert to SRT
                 if (originalFormat === 'ass') {
@@ -458,7 +459,7 @@ app.get('/api/betaseries/proxy/:subtitleId', async (req, res) => {
             
         } else {
             // Not a ZIP, check if it's ASS or SRT content
-            const rawContent = buffer.toString('utf-8');
+            const rawContent = bufferToUtf8(buffer);
             
             if (isAssFormat(rawContent)) {
                 log('debug', `[BetaSeries Proxy] Direct ASS file detected, converting...`);
@@ -495,6 +496,385 @@ app.get('/api/betaseries/proxy/:subtitleId', async (req, res) => {
     } catch (error) {
         log('error', `[BetaSeries Proxy] Error: ${error.message}`);
         res.status(500).send(`BetaSeries proxy error: ${error.message}`);
+    }
+});
+
+// =====================================================
+// YIFY Subtitle Proxy Endpoint
+// =====================================================
+
+/**
+ * YIFY subtitle proxy - handles ZIP extraction for YIFY/YTS subtitles
+ * URL format: /api/yify/proxy/:subtitleId
+ * 
+ * subtitleId format: {slug} (e.g., "the-matrix-1999-english-yify-383630")
+ * 
+ * This endpoint:
+ * 1. Fetches the subtitle detail page from yts-subs.com
+ * 2. Extracts the Base64-encoded download URL
+ * 3. Downloads the ZIP file
+ * 4. Extracts the SRT from the ZIP
+ * 5. Returns the SRT content directly
+ */
+const yifySubtitleCache = new Map();
+const YIFY_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours
+
+function cleanYifyCache() {
+    const now = Date.now();
+    for (const [key, value] of yifySubtitleCache.entries()) {
+        if (now - value.timestamp > YIFY_CACHE_TTL) {
+            yifySubtitleCache.delete(key);
+        }
+    }
+}
+// Clean cache every hour
+setInterval(cleanYifyCache, 60 * 60 * 1000);
+
+app.get('/api/yify/proxy/:subtitleId', async (req, res) => {
+    const { subtitleId } = req.params;
+    
+    log('debug', `[YIFY Proxy] Request: subtitleId=${subtitleId}`);
+    
+    try {
+        // Check cache first
+        const cached = yifySubtitleCache.get(subtitleId);
+        if (cached && Date.now() - cached.timestamp < YIFY_CACHE_TTL) {
+            log('debug', `[YIFY Proxy] Cache HIT for ${subtitleId}`);
+            res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.setHeader('X-YIFY-Cache', 'hit');
+            return res.send(cached.content);
+        }
+        
+        // Step 1: Fetch the subtitle detail page
+        const subtitlePageUrl = `https://yts-subs.com/subtitles/${subtitleId}`;
+        log('debug', `[YIFY Proxy] Fetching subtitle page: ${subtitlePageUrl}`);
+        
+        const pageResponse = await fetch(subtitlePageUrl, {
+            headers: { 
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+        });
+        
+        if (!pageResponse.ok) {
+            log('error', `[YIFY Proxy] Page fetch failed: ${pageResponse.status}`);
+            return res.status(pageResponse.status).send('Failed to fetch subtitle page');
+        }
+        
+        const pageHtml = await pageResponse.text();
+        const cheerio = require('cheerio');
+        const $ = cheerio.load(pageHtml);
+        
+        // Step 2: Extract Base64-encoded download URL
+        const downloadBtn = $('a.download-subtitle, a[data-link]').first();
+        const dataLink = downloadBtn.attr('data-link');
+        
+        if (!dataLink) {
+            log('error', '[YIFY Proxy] No data-link attribute found');
+            return res.status(404).send('Download link not found');
+        }
+        
+        const downloadUrl = Buffer.from(dataLink, 'base64').toString('utf-8');
+        log('debug', `[YIFY Proxy] Download URL: ${downloadUrl}`);
+        
+        // Step 3: Download the ZIP file
+        const zipResponse = await fetch(downloadUrl, {
+            headers: { 'User-Agent': 'SubSense-Stremio/1.0' }
+        });
+        
+        if (!zipResponse.ok) {
+            log('error', `[YIFY Proxy] ZIP download failed: ${zipResponse.status}`);
+            return res.status(zipResponse.status).send('Failed to download subtitle');
+        }
+        
+        const buffer = Buffer.from(await zipResponse.arrayBuffer());
+        
+        // Step 4: Extract SRT from ZIP
+        if (!AdmZip) {
+            log('error', '[YIFY Proxy] adm-zip not installed');
+            return res.status(500).send('ZIP extraction not available');
+        }
+        
+        const zip = new AdmZip(buffer);
+        const entries = zip.getEntries();
+        
+        // Find subtitle file with priority: SRT > ASS/SSA
+        let subtitleEntry = null;
+        let entryFormat = 'srt';
+        
+        // First try to find SRT (preferred)
+        for (const entry of entries) {
+            const name = entry.entryName.toLowerCase();
+            if (name.endsWith('.srt') && !name.startsWith('._')) {
+                subtitleEntry = entry;
+                entryFormat = 'srt';
+                break;
+            }
+        }
+        
+        // Fallback to ASS/SSA if no SRT found
+        if (!subtitleEntry) {
+            for (const entry of entries) {
+                const name = entry.entryName.toLowerCase();
+                if ((name.endsWith('.ass') || name.endsWith('.ssa')) && !name.startsWith('._')) {
+                    subtitleEntry = entry;
+                    entryFormat = 'ass';
+                    break;
+                }
+            }
+        }
+        
+        if (!subtitleEntry) {
+            log('error', '[YIFY Proxy] No subtitle file (SRT/ASS) found in ZIP');
+            return res.status(404).send('No subtitle file (SRT/ASS) found in archive');
+        }
+        
+        let srtContent = bufferToUtf8(subtitleEntry.getData());
+        log('debug', `[YIFY Proxy] Extracted: ${subtitleEntry.entryName} (format: ${entryFormat}, ${srtContent.length} chars)`);
+        
+        // Convert ASS to SRT if needed
+        if (entryFormat === 'ass') {
+            log('debug', '[YIFY Proxy] Converting ASS to SRT...');
+            const result = convertToSrt(srtContent);
+            srtContent = result.srt;
+            log('info', `[YIFY Proxy] Converted ASS to SRT (${result.captionCount} captions)`);
+        }
+        
+        // Cache the result
+        yifySubtitleCache.set(subtitleId, {
+            content: srtContent,
+            originalFormat: entryFormat,
+            timestamp: Date.now()
+        });
+        
+        // Return the SRT content
+        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('X-YIFY-Cache', 'miss');
+        res.setHeader('X-YIFY-Extracted', 'yes');
+        res.setHeader('X-YIFY-Original-Format', entryFormat);
+        if (entryFormat === 'ass') {
+            res.setHeader('X-YIFY-Converted', 'yes');
+        }
+        res.send(srtContent);
+        
+    } catch (error) {
+        log('error', `[YIFY Proxy] Error: ${error.message}`);
+        res.status(500).send(`YIFY proxy error: ${error.message}`);
+    }
+});
+
+// =====================================================
+// TVsubtitles Proxy Endpoint
+// =====================================================
+
+/**
+ * TVsubtitles subtitle proxy - handles download URL resolution and ZIP extraction
+ * URL format: /api/tvsubtitles/proxy/:subtitleId?episodeUrl=xxx&lang=en
+ * 
+ * This endpoint:
+ * 1. If episodeUrl provided, fetches it to get the actual subtitle page
+ * 2. Parses the JavaScript download URL
+ * 3. Downloads the ZIP file
+ * 4. Extracts the SRT
+ * 5. Returns the SRT content
+ */
+const tvsubsSubtitleCache = new Map();
+const TVSUBS_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours
+
+function cleanTvsubsCache() {
+    const now = Date.now();
+    for (const [key, value] of tvsubsSubtitleCache.entries()) {
+        if (now - value.timestamp > TVSUBS_CACHE_TTL) {
+            tvsubsSubtitleCache.delete(key);
+        }
+    }
+}
+setInterval(cleanTvsubsCache, 60 * 60 * 1000);
+
+app.get('/api/tvsubtitles/proxy/:subtitleId', async (req, res) => {
+    const { subtitleId } = req.params;
+    const { episodeUrl, lang } = req.query;
+    
+    const cacheKey = `${subtitleId}:${lang || 'en'}`;
+    
+    log('debug', `[TVsubs Proxy] Request: subtitleId=${subtitleId}, episodeUrl=${episodeUrl}, lang=${lang}`);
+    
+    try {
+        // Check cache first
+        const cached = tvsubsSubtitleCache.get(cacheKey);
+        if (cached && Date.now() - cached.timestamp < TVSUBS_CACHE_TTL) {
+            log('debug', `[TVsubs Proxy] Cache HIT for ${cacheKey}`);
+            res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.setHeader('X-TVsubs-Cache', 'hit');
+            return res.send(cached.content);
+        }
+        
+        let downloadPageUrl;
+        
+        // If episodeUrl is provided, we need to find the subtitle link on that page
+        if (episodeUrl) {
+            log('debug', `[TVsubs Proxy] Fetching episode page: ${episodeUrl}`);
+            const episodeResponse = await fetch(episodeUrl, {
+                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+            });
+            
+            if (!episodeResponse.ok) {
+                return res.status(episodeResponse.status).send('Failed to fetch episode page');
+            }
+            
+            const episodeHtml = await episodeResponse.text();
+            const cheerio = require('cheerio');
+            const $episode = cheerio.load(episodeHtml);
+            
+            // Find the subtitle download link
+            const subtitleLink = $episode(`a[href*="/subtitle-${subtitleId}.html"]`).first();
+            if (subtitleLink.length) {
+                const href = subtitleLink.attr('href');
+                downloadPageUrl = href.startsWith('http') ? href : `http://www.tvsubtitles.net${href}`;
+            }
+        }
+        
+        // If no episodeUrl or couldn't find link, go directly to download page
+        // TVsubtitles structure: subtitle-{id}.html is info page, download-{id}.html has the JS with file path
+        if (!downloadPageUrl) {
+            downloadPageUrl = `http://www.tvsubtitles.net/download-${subtitleId}.html`;
+        } else if (downloadPageUrl.includes('subtitle-')) {
+            // Convert subtitle-{id}.html to download-{id}.html
+            downloadPageUrl = downloadPageUrl.replace('subtitle-', 'download-');
+        }
+        
+        log('debug', `[TVsubs Proxy] Fetching download page: ${downloadPageUrl}`);
+        const downloadPageResponse = await fetch(downloadPageUrl, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+        });
+        
+        if (!downloadPageResponse.ok) {
+            return res.status(downloadPageResponse.status).send('Failed to fetch download page');
+        }
+        
+        const downloadPageHtml = await downloadPageResponse.text();
+        
+        // Parse JavaScript for download URL: s1+s2+s3+s4 pattern
+        // The page uses single quotes: var s1= 'fil';
+        const s1Match = downloadPageHtml.match(/var s1\s*=\s*['"]([^'"]+)['"]/);
+        const s2Match = downloadPageHtml.match(/var s2\s*=\s*['"]([^'"]+)['"]/);
+        const s3Match = downloadPageHtml.match(/var s3\s*=\s*['"]([^'"]+)['"]/);
+        const s4Match = downloadPageHtml.match(/var s4\s*=\s*['"]([^'"]+)['"]/);
+        
+        if (!s1Match || !s2Match || !s3Match || !s4Match) {
+            log('error', '[TVsubs Proxy] Could not parse download URL from JavaScript');
+            log('debug', `[TVsubs Proxy] Page content sample: ${downloadPageHtml.substring(0, 500)}`);
+            return res.status(404).send('Download URL not found');
+        }
+        
+        // The JavaScript builds the path: s1='fil', s2='es/B', s3='re', s4='aking Bad_1x01_es.zip'
+        // Combined: 'files/Breaking Bad_1x01_es.zip' - already includes 'files/' prefix
+        const filename = s1Match[1] + s2Match[1] + s3Match[1] + s4Match[1];
+        const downloadUrl = `http://www.tvsubtitles.net/${filename}`;
+        log('debug', `[TVsubs Proxy] Download URL: ${downloadUrl}`);
+        
+        // Download the ZIP file
+        const zipResponse = await fetch(downloadUrl, {
+            headers: { 'User-Agent': 'SubSense-Stremio/1.0' }
+        });
+        
+        if (!zipResponse.ok) {
+            return res.status(zipResponse.status).send('Failed to download subtitle');
+        }
+        
+        const buffer = Buffer.from(await zipResponse.arrayBuffer());
+        
+        // Check if it's a ZIP or raw SRT
+        const isZip = buffer.length >= 2 && buffer[0] === 0x50 && buffer[1] === 0x4b;
+        
+        let srtContent;
+        let originalFormat = 'srt';
+        
+        if (isZip) {
+            if (!AdmZip) {
+                return res.status(500).send('ZIP extraction not available');
+            }
+            
+            const zip = new AdmZip(buffer);
+            const entries = zip.getEntries();
+            
+            // Find subtitle file with priority: SRT > ASS/SSA
+            let subtitleEntry = null;
+            
+            // First try to find SRT (preferred)
+            for (const entry of entries) {
+                const name = entry.entryName.toLowerCase();
+                if (name.endsWith('.srt') && !name.startsWith('._')) {
+                    subtitleEntry = entry;
+                    originalFormat = 'srt';
+                    break;
+                }
+            }
+            
+            // Fallback to ASS/SSA if no SRT found
+            if (!subtitleEntry) {
+                for (const entry of entries) {
+                    const name = entry.entryName.toLowerCase();
+                    if ((name.endsWith('.ass') || name.endsWith('.ssa')) && !name.startsWith('._')) {
+                        subtitleEntry = entry;
+                        originalFormat = 'ass';
+                        break;
+                    }
+                }
+            }
+            
+            if (!subtitleEntry) {
+                return res.status(404).send('No subtitle file (SRT/ASS) found in archive');
+            }
+            
+            srtContent = bufferToUtf8(subtitleEntry.getData());
+            log('debug', `[TVsubs Proxy] Extracted: ${subtitleEntry.entryName} (format: ${originalFormat})`);
+            
+            // Convert ASS to SRT if needed
+            if (originalFormat === 'ass') {
+                log('debug', '[TVsubs Proxy] Converting ASS to SRT...');
+                const result = convertToSrt(srtContent);
+                srtContent = result.srt;
+                log('info', `[TVsubs Proxy] Converted ASS to SRT (${result.captionCount} captions)`);
+            }
+        } else {
+            // Raw content - check if ASS
+            srtContent = bufferToUtf8(buffer);
+            
+            if (isAssFormat(srtContent)) {
+                originalFormat = 'ass';
+                log('debug', '[TVsubs Proxy] Raw ASS content, converting to SRT...');
+                const result = convertToSrt(srtContent);
+                srtContent = result.srt;
+                log('info', `[TVsubs Proxy] Converted ASS to SRT (${result.captionCount} captions)`);
+            } else {
+                log('debug', `[TVsubs Proxy] Raw SRT content (${srtContent.length} chars)`);
+            }
+        }
+        
+        // Cache the result
+        tvsubsSubtitleCache.set(cacheKey, {
+            content: srtContent,
+            originalFormat: originalFormat,
+            timestamp: Date.now()
+        });
+        
+        // Return the SRT content
+        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('X-TVsubs-Cache', 'miss');
+        res.setHeader('X-TVsubs-Extracted', isZip ? 'yes' : 'no');
+        res.setHeader('X-TVsubs-Original-Format', originalFormat);
+        if (originalFormat === 'ass') {
+            res.setHeader('X-TVsubs-Converted', 'yes');
+        }
+        res.send(srtContent);
+        
+    } catch (error) {
+        log('error', `[TVsubs Proxy] Error: ${error.message}`);
+        res.status(500).send(`TVsubtitles proxy error: ${error.message}`);
     }
 });
 
