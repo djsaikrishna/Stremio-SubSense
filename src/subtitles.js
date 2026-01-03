@@ -46,7 +46,7 @@ async function handleSubtitles(args, config) {
 
         // Log incoming request
         const sessionInfo = config.userId ? `session=${config.userId}` : 'no-session';
-        log('info', `[Request] ${parsed.type} ${parsed.imdbId}${parsed.season ? `:${parsed.season}:${parsed.episode}` : ''} langs=[${languages.join(',')}] ${sessionInfo}`);
+        log('info', `[Request] ${sessionInfo} ${parsed.type} ${parsed.imdbId}${parsed.season ? `:${parsed.season}:${parsed.episode}` : ''} langs=[${languages.join(',')}]`);
 
         // Convert Stremio 3-letter codes to wyzie 2-letter
         const wyzieLanguages = languages.map(lang => mapStremioToWyzie(lang)).filter(Boolean);
@@ -273,7 +273,7 @@ async function fetchSubtitlesFastFirstMulti(parsed, languages) {
             // Handle Wyzie's fast-first response format
             if (value && value.subtitles) {
                 allSubtitles.push(...value.subtitles);
-                summary.push(`${providerName}:${value.subtitles.length}✓`);
+                summary.push(`${providerName}:${value.subtitles.length}`);
                 // Capture background promise if present
                 if (value.backgroundPromise && !backgroundPromise) {
                     backgroundPromise = value.backgroundPromise;
@@ -281,12 +281,12 @@ async function fetchSubtitlesFastFirstMulti(parsed, languages) {
             } else if (Array.isArray(value)) {
                 // Standard provider response
                 allSubtitles.push(...value);
-                summary.push(`${providerName}:${value.length}✓`);
+                summary.push(`${providerName}:${value.length}`);
             } else {
-                summary.push(`${providerName}:0✓`);
+                summary.push(`${providerName}:0`);
             }
         } else {
-            summary.push(`${providerName}:✗`);
+            summary.push(`${providerName}:ERR`);
             log('debug', `[Subtitles] ${providerName} failed: ${result.reason?.message || 'Unknown'}`);
         }
     });
@@ -529,7 +529,7 @@ function formatForStremio(subtitles) {
         return valid;
     });
     
-    log('info', `[formatForStremio] Formatted ${subtitles.length} subtitles → ${validResults.length} entries (ASS duplicated as ASS+SRT)`);
+    log('info', `[formatForStremio] Formatted ${subtitles.length} subtitles => ${validResults.length} entries (ASS duplicated as ASS+SRT)`);
     
     return validResults;
 }

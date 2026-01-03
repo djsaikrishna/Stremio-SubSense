@@ -21,25 +21,10 @@
 
 const { BaseProvider, SubtitleResult } = require('./BaseProvider');
 const { log } = require('../utils');
+const { toBetaseriesCode, getByBetaseriesCode, toAlpha3B, getDisplayName } = require('../languages');
 
 const API_BASE = 'https://api.betaseries.com';
 const API_VERSION = '3.0';
-
-// Language mapping: Stremio language code -> BetaSeries language param
-const LANGUAGE_MAP = {
-    'fra': 'vf',   // French
-    'fre': 'vf',   // French (alternate code)
-    'eng': 'vo',   // English (Original Version)
-    'en': 'vo',
-    'fr': 'vf'
-};
-
-// Reverse mapping: BetaSeries -> ISO 639-2 (3-letter)
-const BS_TO_ISO = {
-    'VF': 'fra',
-    'VO': 'eng',
-    'VOVF': 'mul'  // Multiple languages
-};
 
 class BetaSeriesProvider extends BaseProvider {
     /**
@@ -206,10 +191,10 @@ class BetaSeriesProvider extends BaseProvider {
                 return [];
             }
 
-            // Determine language filter
+            // Determine language filter using unified language module
             let bsLanguage = null;
             if (query.language) {
-                bsLanguage = LANGUAGE_MAP[query.language] || LANGUAGE_MAP[query.language.toLowerCase()];
+                bsLanguage = toBetaseriesCode(query.language) || toBetaseriesCode(query.language.toLowerCase());
             }
 
             // Fetch subtitles
@@ -279,7 +264,7 @@ class BetaSeriesProvider extends BaseProvider {
         if (isZip) {
             // Use proxy for ZIP extraction
             // We'll extract the file matching the requested language
-            const langParam = LANGUAGE_MAP[query.language] || sub.language?.toLowerCase() || 'vo';
+            const langParam = toBetaseriesCode(query.language) || sub.language?.toLowerCase() || 'vo';
             url = `${this.baseUrl}/api/betaseries/proxy/${sub.id}?lang=${langParam}`;
         } else if (isAss) {
             // Direct ASS file - will be routed through formatForStremio dual-format handling
@@ -290,18 +275,19 @@ class BetaSeriesProvider extends BaseProvider {
             url = sub.url;
         }
         
-        // Map BetaSeries language to ISO 639-2
+        // Map BetaSeries language to ISO 639-2 using unified module
         const bsLang = sub.language || 'VO';
-        const languageCode = BS_TO_ISO[bsLang.toUpperCase()] || 'eng';
+        const langEntry = getByBetaseriesCode(bsLang);
+        const languageCode = langEntry ? langEntry.alpha3B : 'eng';
         
-        // Build display name
-        const langDisplay = bsLang === 'VF' ? 'French' : bsLang === 'VO' ? 'English' : bsLang;
+        // Build display name using unified module
+        const langDisplay = langEntry ? langEntry.name : (bsLang === 'VF' ? 'French' : bsLang === 'VO' ? 'English' : bsLang);
         const display = `[${sub.source || 'betaseries'}] ${langDisplay}`;
         
         return new SubtitleResult({
             id: `bs-${sub.id}`,
             url: url,
-            language: languageCode === 'fra' ? 'fr' : 'en',
+            language: langEntry ? langEntry.alpha2 : 'en',
             languageCode: languageCode,
             source: sub.source || 'betaseries',
             provider: 'betaseries',

@@ -18,53 +18,10 @@
 const cheerio = require('cheerio');
 const { BaseProvider, SubtitleResult } = require('./BaseProvider');
 const { log } = require('../utils');
+const { getByYifyCode, getDisplayName, toAlpha2 } = require('../languages');
 
 const BASE_URL = 'https://yts-subs.com';
 const TIMEOUT = 15000;
-
-// Language code mapping for YIFY (they use full language names)
-const LANGUAGE_MAP = {
-    'english': { code: 'en', display: 'English' },
-    'spanish': { code: 'es', display: 'Spanish' },
-    'french': { code: 'fr', display: 'French' },
-    'german': { code: 'de', display: 'German' },
-    'portuguese': { code: 'pt', display: 'Portuguese' },
-    'brazilian': { code: 'pt-BR', display: 'Portuguese (BR)' },
-    'brazilian-portuguese': { code: 'pt-BR', display: 'Portuguese (BR)' },
-    'italian': { code: 'it', display: 'Italian' },
-    'dutch': { code: 'nl', display: 'Dutch' },
-    'polish': { code: 'pl', display: 'Polish' },
-    'russian': { code: 'ru', display: 'Russian' },
-    'turkish': { code: 'tr', display: 'Turkish' },
-    'arabic': { code: 'ar', display: 'Arabic' },
-    'chinese': { code: 'zh', display: 'Chinese' },
-    'japanese': { code: 'ja', display: 'Japanese' },
-    'korean': { code: 'ko', display: 'Korean' },
-    'vietnamese': { code: 'vi', display: 'Vietnamese' },
-    'thai': { code: 'th', display: 'Thai' },
-    'indonesian': { code: 'id', display: 'Indonesian' },
-    'malay': { code: 'ms', display: 'Malay' },
-    'greek': { code: 'el', display: 'Greek' },
-    'romanian': { code: 'ro', display: 'Romanian' },
-    'czech': { code: 'cs', display: 'Czech' },
-    'hungarian': { code: 'hu', display: 'Hungarian' },
-    'swedish': { code: 'sv', display: 'Swedish' },
-    'danish': { code: 'da', display: 'Danish' },
-    'norwegian': { code: 'no', display: 'Norwegian' },
-    'finnish': { code: 'fi', display: 'Finnish' },
-    'hebrew': { code: 'he', display: 'Hebrew' },
-    'persian': { code: 'fa', display: 'Persian' },
-    'farsi': { code: 'fa', display: 'Persian' },
-    'hindi': { code: 'hi', display: 'Hindi' },
-    'bengali': { code: 'bn', display: 'Bengali' },
-    'serbian': { code: 'sr', display: 'Serbian' },
-    'croatian': { code: 'hr', display: 'Croatian' },
-    'slovenian': { code: 'sl', display: 'Slovenian' },
-    'bulgarian': { code: 'bg', display: 'Bulgarian' },
-    'ukrainian': { code: 'uk', display: 'Ukrainian' },
-    'albanian': { code: 'sq', display: 'Albanian' },
-    'icelandic': { code: 'is', display: 'Icelandic' }
-};
 
 class YIFYProvider extends BaseProvider {
     /**
@@ -164,7 +121,12 @@ class YIFYProvider extends BaseProvider {
 
                 // Get language from .sub-lang cell
                 const langText = $row.find('.sub-lang').text().trim().toLowerCase();
-                const langInfo = LANGUAGE_MAP[langText] || { 
+                
+                const langEntry = getByYifyCode(langText);
+                const langInfo = langEntry ? {
+                    code: langEntry.alpha2,
+                    display: langEntry.name
+                } : { 
                     code: langText.substring(0, 2), 
                     display: langText.charAt(0).toUpperCase() + langText.slice(1)
                 };

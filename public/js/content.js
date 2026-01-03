@@ -1,33 +1,24 @@
 /**
  * SubSense Content Browser Logic
- * Browse and search cached subtitle data
  */
 
 let currentPage = 1;
 const PAGE_SIZE = 20;
 
-/**
- * Re-check truncation after content update
- * @param {HTMLElement} container - The container element to check within
- */
 function refreshTruncatedCells(container = document) {
     const cells = container.querySelectorAll('.data-table td');
     cells.forEach(cell => {
-        // Skip cells with buttons or special content
         if (cell.querySelector('button, code')) return;
         
-        // Remove previous state
         cell.classList.remove('truncated', 'expanded');
         cell.removeAttribute('data-fulltext');
         
-        // Re-check if truncated
         if (cell.scrollWidth > cell.clientWidth) {
             const fullText = cell.textContent.trim();
             cell.classList.add('truncated');
             cell.setAttribute('data-fulltext', fullText);
-            cell.setAttribute('title', fullText); // Add native tooltip for hover
+            cell.setAttribute('title', fullText);
             
-            // Re-add click handler if not already present
             if (!cell.hasAttribute('data-click-handler')) {
                 cell.setAttribute('data-click-handler', 'true');
                 cell.addEventListener('click', function(e) {
@@ -39,18 +30,12 @@ function refreshTruncatedCells(container = document) {
     });
 }
 
-/**
- * Initialize the content browser
- */
 document.addEventListener('DOMContentLoaded', () => {
     fetchVersion();
     loadRecentContent();
     setupSearchHandlers();
 });
 
-/**
- * Fetch version from API
- */
 async function fetchVersion() {
     try {
         const response = await fetch('/api/version');
@@ -67,27 +52,21 @@ async function fetchVersion() {
     }
 }
 
-/**
- * Setup search event handlers
- */
 function setupSearchHandlers() {
     const searchInput = document.getElementById('imdbSearch');
     const searchBtn = document.getElementById('searchBtn');
     const hint = document.getElementById('searchHint');
     
-    // Search on button click
     searchBtn.addEventListener('click', () => {
         performSearch(searchInput.value.trim());
     });
     
-    // Search on Enter key
     searchInput.addEventListener('keypress', (e) => {
         if (e.key === 'Enter') {
             performSearch(searchInput.value.trim());
         }
     });
     
-    // Real-time validation
     searchInput.addEventListener('input', () => {
         const value = searchInput.value.trim().toLowerCase();
         const isValid = /^tt\d{7,8}$/.test(value);
@@ -111,7 +90,6 @@ function setupSearchHandlers() {
         }
     });
     
-    // Pagination
     document.getElementById('prevPage').addEventListener('click', () => {
         if (currentPage > 1) {
             currentPage--;
@@ -125,14 +103,10 @@ function setupSearchHandlers() {
     });
 }
 
-/**
- * Perform IMDB search
- */
 async function performSearch(imdbId) {
     const resultCard = document.getElementById('resultCard');
     const notFoundCard = document.getElementById('notFoundCard');
     
-    // Hide previous results
     resultCard.style.display = 'none';
     notFoundCard.style.display = 'none';
     
@@ -140,7 +114,6 @@ async function performSearch(imdbId) {
         return;
     }
     
-    // Normalize to lowercase
     imdbId = imdbId.toLowerCase();
     
     try {
@@ -166,9 +139,6 @@ async function performSearch(imdbId) {
     }
 }
 
-/**
- * Display search result
- */
 function displaySearchResult(data) {
     const resultCard = document.getElementById('resultCard');
     const notFoundCard = document.getElementById('notFoundCard');
@@ -176,7 +146,6 @@ function displaySearchResult(data) {
     notFoundCard.style.display = 'none';
     resultCard.style.display = 'block';
     
-    // Update title
     document.getElementById('resultTitle').innerHTML = `
         <svg class="section-icon" viewBox="0 0 24 24">
             <path d="M18 4l2 4h-3l-2-4h-2l2 4h-3l-2-4H8l2 4H7L5 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V4h-4z"/>
@@ -184,22 +153,18 @@ function displaySearchResult(data) {
         ${data.imdbId.toUpperCase()}
     `;
     
-    // Update summary stats
     document.getElementById('resultTotalSubs').textContent = data.totalSubtitles.toLocaleString();
     document.getElementById('resultLanguages').textContent = data.uniqueLanguages;
     document.getElementById('resultSources').textContent = data.sources.length;
     document.getElementById('resultAge').textContent = formatAge(data.lastUpdated);
     
-    // Update sources list
     const sourcesList = document.getElementById('sourcesList');
     sourcesList.innerHTML = data.sources.map(source => 
         `<span class="language-tag">${source}</span>`
     ).join('');
     
-    // Build language breakdown
     const breakdownBody = document.getElementById('breakdownTableBody');
     
-    // Group by language (across all episodes for series)
     const langGroups = {};
     data.breakdown.forEach(item => {
         const lang = item.language;
@@ -217,7 +182,6 @@ function displaySearchResult(data) {
         langGroups[lang].lastUpdated = Math.max(langGroups[lang].lastUpdated, item.last_updated);
     });
     
-    // Sort by count descending
     const sortedLangs = Object.entries(langGroups)
         .sort((a, b) => b[1].count - a[1].count);
     
@@ -233,14 +197,12 @@ function displaySearchResult(data) {
         `;
     }).join('');
     
-    // Check if it's a series (has season/episode data)
     const hasEpisodes = data.breakdown.some(item => item.season !== null || item.episode !== null);
     const seriesBreakdown = document.getElementById('seriesBreakdown');
     
     if (hasEpisodes) {
         seriesBreakdown.style.display = 'block';
         
-        // Group by season/episode
         const episodeGroups = {};
         data.breakdown.forEach(item => {
             const key = `S${item.season || 0}E${item.episode || 0}`;
@@ -256,7 +218,6 @@ function displaySearchResult(data) {
             episodeGroups[key].count += item.subtitle_count;
         });
         
-        // Sort by season, then episode
         const sortedEpisodes = Object.values(episodeGroups)
             .sort((a, b) => {
                 if (a.season !== b.season) return (a.season || 0) - (b.season || 0);
@@ -276,16 +237,11 @@ function displaySearchResult(data) {
         seriesBreakdown.style.display = 'none';
     }
     
-    // Initialize truncated cell expand functionality
     setTimeout(() => refreshTruncatedCells(resultCard), 100);
     
-    // Scroll to result
     resultCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
-/**
- * Show not found message
- */
 function showNotFound(imdbId, message = null) {
     const resultCard = document.getElementById('resultCard');
     const notFoundCard = document.getElementById('notFoundCard');
@@ -297,9 +253,6 @@ function showNotFound(imdbId, message = null) {
         message || `No cached subtitles found for ${imdbId.toUpperCase()}`;
 }
 
-/**
- * Load recent content list
- */
 async function loadRecentContent() {
     const tbody = document.getElementById('recentTableBody');
     const pagination = document.getElementById('pagination');
@@ -319,14 +272,12 @@ async function loadRecentContent() {
             return;
         }
         
-        // Populate table
         tbody.innerHTML = data.items.map(item => {
             const isSeries = item.season !== null;
             const typeBadge = isSeries 
                 ? '<span class="badge badge-series">Series</span>' 
                 : '<span class="badge badge-info">Movie</span>';
             
-            // Format episode info - now in separate column
             let episodeCell = '';
             if (isSeries) {
                 const season = String(item.season).padStart(2, '0');
@@ -352,10 +303,8 @@ async function loadRecentContent() {
             `;
         }).join('');
         
-        // Initialize truncated cell expand functionality
         setTimeout(() => refreshTruncatedCells(), 100);
         
-        // Update pagination
         const totalPages = Math.ceil(data.total / PAGE_SIZE);
         
         if (totalPages > 1) {
@@ -373,9 +322,6 @@ async function loadRecentContent() {
     }
 }
 
-/**
- * Format timestamp age
- */
 function formatAge(timestamp) {
     if (!timestamp) return '-';
     

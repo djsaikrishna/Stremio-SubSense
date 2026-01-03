@@ -21,60 +21,11 @@
 const cheerio = require('cheerio');
 const { BaseProvider, SubtitleResult } = require('./BaseProvider');
 const { log } = require('../utils');
+const { getByTvsubtitlesCode, toTvsubtitlesCode, getDisplayName, toAlpha2 } = require('../languages');
 
 const BASE_URL = 'http://www.tvsubtitles.net';
 const CINEMETA_URL = 'https://v3-cinemeta.strem.io/meta';
 const TIMEOUT = 15000;
-
-// Language code mapping
-const LANGUAGE_MAP = {
-    'en': { code: 'en', display: 'English' },
-    'es': { code: 'es', display: 'Spanish' },
-    'fr': { code: 'fr', display: 'French' },
-    'de': { code: 'de', display: 'German' },
-    'pt': { code: 'pt', display: 'Portuguese' },
-    'br': { code: 'pt-BR', display: 'Portuguese (BR)' },
-    'it': { code: 'it', display: 'Italian' },
-    'nl': { code: 'nl', display: 'Dutch' },
-    'pl': { code: 'pl', display: 'Polish' },
-    'ru': { code: 'ru', display: 'Russian' },
-    'tr': { code: 'tr', display: 'Turkish' },
-    'ar': { code: 'ar', display: 'Arabic' },
-    'zh': { code: 'zh', display: 'Chinese' },
-    'ja': { code: 'ja', display: 'Japanese' },
-    'ko': { code: 'ko', display: 'Korean' },
-    'vi': { code: 'vi', display: 'Vietnamese' },
-    'th': { code: 'th', display: 'Thai' },
-    'id': { code: 'id', display: 'Indonesian' },
-    'gr': { code: 'el', display: 'Greek' },
-    'ro': { code: 'ro', display: 'Romanian' },
-    'cs': { code: 'cs', display: 'Czech' },
-    'hu': { code: 'hu', display: 'Hungarian' },
-    'sv': { code: 'sv', display: 'Swedish' },
-    'da': { code: 'da', display: 'Danish' },
-    'no': { code: 'no', display: 'Norwegian' },
-    'fi': { code: 'fi', display: 'Finnish' },
-    'he': { code: 'he', display: 'Hebrew' },
-    'fa': { code: 'fa', display: 'Persian' },
-    'hi': { code: 'hi', display: 'Hindi' },
-    'sr': { code: 'sr', display: 'Serbian' },
-    'hr': { code: 'hr', display: 'Croatian' },
-    'sl': { code: 'sl', display: 'Slovenian' },
-    'bg': { code: 'bg', display: 'Bulgarian' },
-    'ua': { code: 'uk', display: 'Ukrainian' },
-    'uk': { code: 'uk', display: 'Ukrainian' }
-};
-
-// Reverse mapping from ISO code to TVsubtitles flag code
-const ISO_TO_TVSUBTITLES = {
-    'en': 'en', 'es': 'es', 'fr': 'fr', 'de': 'de', 'pt': 'pt',
-    'pt-br': 'br', 'it': 'it', 'nl': 'nl', 'pl': 'pl', 'ru': 'ru',
-    'tr': 'tr', 'ar': 'ar', 'zh': 'zh', 'ja': 'ja', 'ko': 'ko',
-    'vi': 'vi', 'th': 'th', 'id': 'id', 'el': 'gr', 'ro': 'ro',
-    'cs': 'cs', 'hu': 'hu', 'sv': 'sv', 'da': 'da', 'no': 'no',
-    'fi': 'fi', 'he': 'he', 'fa': 'fa', 'hi': 'hi', 'sr': 'sr',
-    'hr': 'hr', 'sl': 'sl', 'bg': 'bg', 'uk': 'ua'
-};
 
 class TVsubtitlesProvider extends BaseProvider {
     /**
@@ -290,21 +241,19 @@ class TVsubtitlesProvider extends BaseProvider {
                     const tvsLangCode = langMatch[1];
                     if (tvsLangCode === 'blank') return; // Skip blank flags
                     
-                    const langInfo = LANGUAGE_MAP[tvsLangCode] || {
-                        code: tvsLangCode,
-                        display: tvsLangCode.toUpperCase()
-                    };
+                    const langEntry = getByTvsubtitlesCode(tvsLangCode);
+                    const langInfo = langEntry 
+                        ? { code: langEntry.alpha2, display: langEntry.name }
+                        : { code: tvsLangCode, display: tvsLangCode.toUpperCase() };
 
-                    // Apply language filter
                     if (languageFilter) {
                         const filterLower = languageFilter.toLowerCase();
-                        const tvsFilterCode = ISO_TO_TVSUBTITLES[filterLower] || filterLower;
+                        const tvsFilterCode = toTvsubtitlesCode(filterLower) || filterLower;
                         if (tvsLangCode !== tvsFilterCode && langInfo.code !== filterLower) {
                             return;
                         }
                     }
 
-                    // Get the link associated with this flag
                     const $link = $img.parent('a');
                     const href = $link.attr('href');
 

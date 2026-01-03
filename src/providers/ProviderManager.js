@@ -98,18 +98,17 @@ class ProviderManager {
             if (result.status === 'fulfilled') {
                 allSubtitles.push(...result.value);
                 successCount++;
-                providerSummary.push(`${provider.name}:${result.value.length}✓`);
+                providerSummary.push(`${provider.name}:${result.value.length}`);
                 log('debug', `[ProviderManager] ${provider.name}: ${result.value.length} subtitles`);
             } else {
                 failCount++;
-                providerSummary.push(`${provider.name}:✗`);
+                providerSummary.push(`${provider.name}:ERR`);
                 log('error', `[ProviderManager] ${provider.name} failed: ${result.reason?.message || 'Unknown error'}`);
             }
         });
 
         log('debug', `[ProviderManager] Total aggregated: ${allSubtitles.length} subtitles`);
         
-        // Synthesized INFO log for production monitoring
         log('info', `[Providers] ${successCount}/${enabledProviders.length} ok (${totalTime}ms) - ${providerSummary.join(', ')}`);
         
         return allSubtitles;

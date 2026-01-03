@@ -1,4 +1,4 @@
-/* SubSense - Modern Blue Theme Styles */
+/* SubSense - Blue Theme Styles */
 
 /* ===== CSS Variables ===== */
 :root {
@@ -36,7 +36,7 @@
     box-sizing: border-box;
 }
 
-/* ===== Modern Scrollbar Styling ===== */
+/* ===== Scrollbar Styling ===== */
 ::-webkit-scrollbar {
     width: 8px;
     height: 8px;
@@ -273,15 +273,13 @@ body::before {
     position: relative;
     transition: var(--transition);
     z-index: 1;
-    overflow: visible; /* Allow dropdowns to overflow */
+    overflow: visible;
 }
 
-/* First card (Language Configuration) needs higher z-index for dropdown overlays */
 .card:first-of-type {
     z-index: 100;
 }
 
-/* When multiselect is active, boost z-index even more */
 .card:has(.multiselect-container.active) {
     z-index: 200;
 }
@@ -328,12 +326,10 @@ body::before {
     position: relative;
 }
 
-/* Language selector needs higher z-index for dropdown */
 .form-group:has(.multiselect-container) {
     z-index: 200;
 }
 
-/* MAX_SUBTITLES select has lower z-index */
 .form-group:has(.select-container) {
     z-index: 100;
 }
@@ -381,7 +377,7 @@ label {
     margin-top: 28px;
     position: relative;
     z-index: 50;
-    text-align: center; /* Center the inline-flex wrapper */
+    text-align: center;
 }
 
 .install-button-wrapper {
@@ -501,7 +497,7 @@ label {
     display: none;
     position: absolute;
     top: 100%;
-    right: 0; /* Align with right side (arrow side) */
+    right: 0;
     left: auto;
     min-width: 220px;
     margin-top: 12px;
@@ -537,7 +533,7 @@ label {
 
 .install-dropdown-item svg { width: 18px; height: 18px; fill: var(--color-accent-blue); }
 
-/* Responsive Install Button */
+/* Install Button */
 @media (max-width: 520px) {
     .install-btn {
         padding: 14px 20px;
@@ -653,7 +649,7 @@ label {
     border-color: rgba(155, 89, 182, 0.6);
 }
 
-/* Provider Badge (in configure page) */
+/* Provider Badge */
 .provider-badge {
     display: inline-flex;
     align-items: center;
@@ -666,7 +662,7 @@ label {
     letter-spacing: 0.05em;
 }
 
-/* Combo Badge Styles (Restored & Hover added) */
+/* Combo Badge Styles */
 .combo-item {
     display: flex;
     justify-content: space-between;
@@ -676,6 +672,8 @@ label {
     border: 1px solid var(--color-border);
     border-radius: 8px;
     transition: var(--transition);
+    position: relative;
+    cursor: default;
 }
 
 .combo-item:hover {
@@ -683,6 +681,41 @@ label {
     border-color: var(--color-border-strong);
     transform: translateY(-2px);
     box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+}
+
+/* Truncated combo with tooltip on hover */
+.combo-item.truncated-combo {
+    cursor: help;
+}
+
+.combo-item.truncated-combo::after {
+    content: attr(title);
+    position: absolute;
+    left: 50%;
+    bottom: 100%;
+    transform: translateX(-50%);
+    background: var(--color-dark-blue-bg);
+    color: var(--color-text-primary);
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    white-space: nowrap;
+    max-width: 320px;
+    white-space: normal;
+    word-wrap: break-word;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    border: 1px solid var(--color-border);
+    z-index: 100;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.2s, visibility 0.2s;
+    pointer-events: none;
+    margin-bottom: 8px;
+}
+
+.combo-item.truncated-combo:hover::after {
+    opacity: 1;
+    visibility: visible;
 }
 
 .combo-langs {
@@ -715,27 +748,23 @@ label {
     backdrop-filter: blur(8px);
 }
 
-/* Toggle + Label Group */
 .toggle-group {
     display: flex;
     align-items: center;
     gap: 12px;
 }
 
-/* The toggle switch container */
 .toggle-switch {
     position: relative;
     width: 46px;
     height: 24px;
     flex-shrink: 0;
-    /* Reset global label styles */
     display: block;
     margin-bottom: 0;
     font-size: inherit;
     font-weight: inherit;
 }
 
-/* Hide the actual checkbox */
 .toggle-switch input {
     position: absolute;
     opacity: 0;
@@ -843,7 +872,7 @@ label {
     margin-bottom: 24px;
 }
 
-/* Explicit Grid for Overview - forces 6 columns on large screens */
+/* Explicit Grid for Overview */
 .stats-grid.grid-6 {
     grid-template-columns: repeat(6, 1fr);
 }
@@ -997,14 +1026,13 @@ label {
 
 .data-table tr:hover { background: rgba(74, 144, 226, 0.05); }
 
-/* ===== Multiselect Dropdown (Restored & Fixed) ===== */
+/* ===== Multiselect Dropdown ===== */
 .multiselect-container {
     position: relative;
     width: 100%;
     z-index: 100;
 }
 
-/* When active (dropdown open), raise z-index to be above other form elements */
 .multiselect-container.active {
     z-index: 300;
 }
@@ -1135,7 +1163,6 @@ label {
     cursor: pointer;
 }
 
-/* Selected items are now clickable - add hover darkening effect */
 .option-item.selected:hover, .option-item.selected.highlighted {
     background: rgba(74, 144, 226, 0.25);
     padding-left: 20px;
@@ -1204,7 +1231,7 @@ label {
     width: 20px;
     height: 20px;
     fill: currentColor;
-    transition: transform 0.4s ease; /* Restore loop animation logic */
+    transition: transform 0.4s ease;
 }
 .github-link:hover svg {
     transform: rotate(360deg);
@@ -1496,7 +1523,7 @@ code:hover {
     font-weight: 600;
     opacity: 0;
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    z-index: 2000; /* High Z-index to show over everything */
+    z-index: 2000;
     box-shadow: 0 5px 20px rgba(76, 175, 80, 0.4);
 }
 

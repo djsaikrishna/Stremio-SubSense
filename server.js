@@ -59,6 +59,32 @@ app.get('/api/version', (req, res) => {
     res.json({ version: packageJson.version });
 });
 
+// Languages API endpoint (for dynamic language list in configuration UI)
+app.get('/api/languages', (req, res) => {
+    const { getSupportedLanguages, LANGUAGE_TABLE } = require('./src/languages');
+    
+    // Support different formats via query param
+    const format = req.query.format || 'simple';
+    
+    if (format === 'full') {
+        // Return complete language table with all codes
+        res.json(LANGUAGE_TABLE.map(lang => ({
+            alpha2: lang.alpha2,
+            alpha3B: lang.alpha3B,
+            alpha3T: lang.alpha3T,
+            name: lang.name,
+            nativeName: lang.nativeName,
+            providerCodes: lang.providerCodes
+        })));
+    } else {
+        // Simple format for configure.js dropdown (code + name)
+        res.json(LANGUAGE_TABLE.map(lang => ({
+            code: lang.alpha3B,  // Use alpha3B for Stremio compatibility
+            name: lang.name
+        })));
+    }
+});
+
 // =====================================================
 // Stats API Endpoints
 // =====================================================

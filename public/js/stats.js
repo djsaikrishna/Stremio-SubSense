@@ -7,31 +7,79 @@ let langChart = null;
 let timingChart = null;
 let refreshInterval = null;
 
-const REFRESH_INTERVAL_MS = 30000; // 30 seconds
+const REFRESH_INTERVAL_MS = 30000;
 
-// Chart colors - Modern Gradient Palette
+let languageLookup = {};
+
+async function loadLanguageLookup() {
+    try {
+        const response = await fetch('/api/languages');
+        if (response.ok) {
+            const languages = await response.json();
+            languages.forEach(lang => {
+                if (lang.code) {
+                    languageLookup[lang.code.toLowerCase()] = lang.name;
+                }
+            });
+            console.log(`Loaded ${Object.keys(languageLookup).length} language names for stats display`);
+        }
+    } catch (error) {
+        console.warn('Failed to load language names:', error);
+    }
+}
+
+function getLanguageDisplayName(code) {
+    if (!code) return code;
+    const lowerCode = code.toLowerCase();
+    return languageLookup[lowerCode] || code.toUpperCase();
+}
+
+function formatLanguageCombo(langList, maxLength = 40) {
+    if (!langList) return { display: langList, full: langList, isTruncated: false };
+    
+    const codes = langList.split(',').map(c => c.trim());
+    const names = codes.map(c => getLanguageDisplayName(c));
+    const fullText = names.join(', ');
+    
+    if (fullText.length <= maxLength) {
+        return { display: fullText, full: fullText, isTruncated: false };
+    }
+    
+    let truncated = '';
+    for (let i = 0; i < names.length; i++) {
+        const next = truncated ? truncated + ', ' + names[i] : names[i];
+        if (next.length > maxLength - 3) {
+            break;
+        }
+        truncated = next;
+    }
+    
+    return { 
+        display: truncated + '...', 
+        full: fullText, 
+        isTruncated: true 
+    };
+}
+
 const CHART_COLORS = [
-    '#4A90E2', '#6BA5E7', '#89B9EC', '#A7CEF1',  // Blues
-    '#9B59B6', '#B07CC6', '#C59FD6', '#DAC2E6',  // Purples
-    '#2ECC71', '#58D68D', '#82E0A9', '#ABEDC5',  // Greens
-    '#E74C3C', '#ED7669', '#F3A096', '#F9CAC3',  // Reds
-    '#F39C12', '#F6B93B', '#F9D56E', '#FCF1A1',  // Oranges/Yellows
-    '#1ABC9C', '#48C9B0', '#76D7C4', '#A3E4D7'   // Teals
+    '#4A90E2', '#6BA5E7', '#89B9EC', '#A7CEF1',
+    '#9B59B6', '#B07CC6', '#C59FD6', '#DAC2E6',
+    '#2ECC71', '#58D68D', '#82E0A9', '#ABEDC5',
+    '#E74C3C', '#ED7669', '#F3A096', '#F9CAC3',
+    '#F39C12', '#F6B93B', '#F9D56E', '#FCF1A1',
+    '#1ABC9C', '#48C9B0', '#76D7C4', '#A3E4D7'
 ];
 
-// Configuration for language chart
 let topLanguagesCount = 10;
 const MIN_LANGUAGES = 3;
 const MAX_LANGUAGES = 20;
 
-// Store last stats for re-rendering
 let lastStats = null;
 const CHART_GRADIENTS = {
     source: ['#4A90E2', '#9B59B6', '#2ECC71', '#E74C3C', '#F39C12', '#1ABC9C'],
     language: ['#6BA5E7', '#B07CC6', '#58D68D', '#ED7669', '#F6B93B', '#48C9B0']
 };
 
-// Chart.js plugin for center text in doughnut
 const centerTextPlugin = {
     id: 'centerText',
     beforeDraw: function(chart) {
@@ -44,13 +92,11 @@ const centerTextPlugin = {
         
         const centerConfig = chart.config.options.plugins.centerText;
         
-        // Calculate center of the chart area
         const centerX = (chartArea.left + chartArea.right) / 2;
         const centerY = (chartArea.top + chartArea.bottom) / 2;
         
         ctx.save();
         
-        // Draw total value
         const total = chart.data.datasets[0].data.reduce((a, b) => a + b, 0);
         ctx.font = 'bold 22px Inter, sans-serif';
         ctx.fillStyle = '#E8EDF5';
@@ -58,7 +104,6 @@ const centerTextPlugin = {
         ctx.textBaseline = 'middle';
         ctx.fillText(total.toLocaleString(), centerX, centerY - 6);
         
-        // Draw label
         ctx.font = '11px Inter, sans-serif';
         ctx.fillStyle = '#9CA8C8';
         ctx.fillText(centerConfig.label || 'Total', centerX, centerY + 14);
@@ -67,32 +112,22 @@ const centerTextPlugin = {
     }
 };
 
-// Register the plugin
 Chart.register(centerTextPlugin);
 
-/**
- * Re-check truncation after content update
- * Adds click-to-expand and hover tooltip for truncated cells
- * @param {HTMLElement} container - The container element to check within
- */
 function refreshTruncatedCells(container = document) {
     const cells = container.querySelectorAll('.data-table td');
     cells.forEach(cell => {
-        // Skip cells with buttons or special content
         if (cell.querySelector('button, code')) return;
         
-        // Remove previous state
         cell.classList.remove('truncated', 'expanded');
         cell.removeAttribute('data-fulltext');
         
-        // Re-check if truncated
         if (cell.scrollWidth > cell.clientWidth) {
             const fullText = cell.textContent.trim();
             cell.classList.add('truncated');
             cell.setAttribute('data-fulltext', fullText);
-            cell.setAttribute('title', fullText); // Add native tooltip for hover
+            cell.setAttribute('title', fullText);
             
-            // Add click handler if not already present
             if (!cell.hasAttribute('data-click-handler')) {
                 cell.setAttribute('data-click-handler', 'true');
                 cell.addEventListener('click', function(e) {
@@ -104,11 +139,9 @@ function refreshTruncatedCells(container = document) {
     });
 }
 
-/**
- * Initialize the dashboard
- */
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     fetchVersion();
+    await loadLanguageLookup();
     initCharts();
     setupLimitSelector();
     setupLangSelector();
@@ -116,9 +149,6 @@ document.addEventListener('DOMContentLoaded', () => {
     setupAutoRefresh();
 });
 
-/**
- * Setup language selector event handler (custom dropdown)
- */
 function setupLangSelector() {
     const wrapper = document.getElementById('langSelectorWrapper');
     const trigger = document.getElementById('langSelectorTrigger');
@@ -127,14 +157,12 @@ function setupLangSelector() {
     
     if (!trigger || !optionsContainer || !hiddenInput) return;
     
-    // Toggle dropdown on trigger click
     trigger.addEventListener('click', () => {
         wrapper.classList.toggle('active');
         trigger.classList.toggle('active');
         optionsContainer.classList.toggle('show');
     });
     
-    // Close dropdown when clicking outside
     document.addEventListener('click', (e) => {
         if (!wrapper.contains(e.target)) {
             wrapper.classList.remove('active');
@@ -143,37 +171,29 @@ function setupLangSelector() {
         }
     });
     
-    // Handle option selection
     optionsContainer.addEventListener('click', (e) => {
         const option = e.target.closest('.custom-select-option');
         if (option) {
             const value = option.dataset.value;
             const text = option.textContent;
             
-            // Update hidden input and display text
             hiddenInput.value = value;
             document.getElementById('langSelectorText').textContent = text;
             
-            // Update selected styling
             optionsContainer.querySelectorAll('.custom-select-option').forEach(opt => {
                 opt.classList.remove('selected');
             });
             option.classList.add('selected');
             
-            // Close dropdown
             wrapper.classList.remove('active');
             trigger.classList.remove('active');
             optionsContainer.classList.remove('show');
             
-            // Trigger update
             updateSelectedLangRate();
         }
     });
 }
 
-/**
- * Fetch version from API
- */
 async function fetchVersion() {
     try {
         const response = await fetch('/api/version');
@@ -190,11 +210,7 @@ async function fetchVersion() {
     }
 }
 
-/**
- * Initialize empty charts
- */
 function initCharts() {
-    // Common doughnut options with center text
     const doughnutOptions = {
         responsive: true,
         maintainAspectRatio: true,
@@ -243,7 +259,6 @@ function initCharts() {
         }
     };
 
-    // Source distribution (doughnut with center total)
     const sourceCtx = document.getElementById('sourceChart').getContext('2d');
     sourceChart = new Chart(sourceCtx, {
         type: 'doughnut',
@@ -264,7 +279,6 @@ function initCharts() {
         }
     });
 
-    // Language distribution (Horizontal Bar Chart)
     const langCtx = document.getElementById('langChart').getContext('2d');
     langChart = new Chart(langCtx, {
         type: 'bar',
@@ -330,15 +344,12 @@ function initCharts() {
                     }
                 }
             },
-            // Prevent resize on hover
             onHover: null
         }
     });
 
-    // Timing chart (line)
     const timingCtx = document.getElementById('timingChart').getContext('2d');
     
-    // Create gradient for line chart
     const timingGradient = timingCtx.createLinearGradient(0, 0, 0, 200);
     timingGradient.addColorStop(0, 'rgba(74, 144, 226, 0.4)');
     timingGradient.addColorStop(1, 'rgba(74, 144, 226, 0.02)');
@@ -415,12 +426,8 @@ function initCharts() {
     });
 }
 
-/**
- * Fetch and display stats
- */
 async function loadStats() {
     try {
-        // Load main stats
         const response = await fetch('/stats/json');
         const stats = await response.json();
         
@@ -431,13 +438,10 @@ async function loadStats() {
         updateErrorsTable(stats);
         updateLastUpdated();
         
-        // Load cache stats
         loadCacheStats();
         
-        // Load provider stats
         loadProviderStats();
         
-        // Initialize truncated cell expand functionality
         setTimeout(() => refreshTruncatedCells(), 100);
         
     } catch (error) {
@@ -445,9 +449,6 @@ async function loadStats() {
     }
 }
 
-/**
- * Update overview stat cards
- */
 function updateOverview(stats) {
     document.getElementById('totalRequests').textContent = stats.requests.total.toLocaleString();
     document.getElementById('movieRequests').textContent = stats.requests.movie.toLocaleString();
@@ -457,35 +458,26 @@ function updateOverview(stats) {
     document.getElementById('uptime').textContent = stats.uptime.formatted;
 }
 
-/**
- * Update language matching stats
- */
 function updateLanguageMatching(stats) {
     const lm = stats.languageMatching || {};
     
-    // Update active sessions in toggle container
     const activeSessionsEl = document.getElementById('activeSessionsCount');
     if (activeSessionsEl) {
         activeSessionsEl.textContent = (lm.activeSessionCount || 0).toLocaleString();
     }
     
-    // Rate cards: at least one preferred & all preferred
     document.getElementById('anyPreferredRate').textContent = `${lm.anyPreferredRate || 0}%`;
     document.getElementById('allPreferredRate').textContent = `${lm.allPreferredRate || 0}%`;
     
-    // Populate language selector for per-language success rate (custom dropdown)
     const langSelector = document.getElementById('langSelector');
     const optionsContainer = document.getElementById('langSelectorOptions');
     const langSelectorText = document.getElementById('langSelectorText');
     const perLanguage = lm.perLanguage || [];
     
-    // Store perLanguage data globally for selection handler
     window._perLanguageStats = perLanguage;
     
-    // Sort by total_requests descending (highest first)
     const sortedPerLanguage = [...perLanguage].sort((a, b) => b.total_requests - a.total_requests);
     
-    // Only update options if they've changed
     const currentValue = langSelector.value;
     const newOptions = sortedPerLanguage.map(l => l.language_code).join(',');
     
@@ -500,9 +492,9 @@ function updateLanguageMatching(stats) {
                 const opt = document.createElement('div');
                 opt.className = 'custom-select-option';
                 opt.dataset.value = langData.language_code;
-                opt.textContent = `${langData.language_code.toUpperCase()} - ${langData.total_requests} requests`;
+                const langName = getLanguageDisplayName(langData.language_code);
+                opt.textContent = `${langName} - ${langData.total_requests} requests`;
                 
-                // Mark first or current as selected
                 if ((index === 0 && !currentValue) || langData.language_code === currentValue) {
                     opt.classList.add('selected');
                 }
@@ -510,16 +502,17 @@ function updateLanguageMatching(stats) {
                 optionsContainer.appendChild(opt);
             });
             
-            // Default to highest-request language if nothing selected yet
             if (!currentValue && sortedPerLanguage.length > 0) {
                 langSelector.value = sortedPerLanguage[0].language_code;
                 if (langSelectorText) {
-                    langSelectorText.textContent = `${sortedPerLanguage[0].language_code.toUpperCase()} - ${sortedPerLanguage[0].total_requests} requests`;
+                    const langName = getLanguageDisplayName(sortedPerLanguage[0].language_code);
+                    langSelectorText.textContent = `${langName} - ${sortedPerLanguage[0].total_requests} requests`;
                 }
             } else if (currentValue) {
                 const currentData = sortedPerLanguage.find(l => l.language_code === currentValue);
                 if (currentData && langSelectorText) {
-                    langSelectorText.textContent = `${currentData.language_code.toUpperCase()} - ${currentData.total_requests} requests`;
+                    const langName = getLanguageDisplayName(currentData.language_code);
+                    langSelectorText.textContent = `${langName} - ${currentData.total_requests} requests`;
                 }
             }
         }
@@ -527,24 +520,24 @@ function updateLanguageMatching(stats) {
         langSelector.dataset.options = newOptions;
     }
     
-    // Update selected language rate
     updateSelectedLangRate();
     
-    // Top language combinations
     const combosContainer = document.getElementById('langCombinations');
     const combos = lm.popularCombinations || [];
     if (combos.length > 0) {
-        combosContainer.innerHTML = combos.slice(0, 5).map(combo => 
-            `<div class="combo-item">
-                <span class="combo-langs">${combo.languages}</span>
+        combosContainer.innerHTML = combos.slice(0, 5).map(combo => {
+            const formatted = formatLanguageCombo(combo.languages, 35);
+            const tooltipAttr = formatted.isTruncated ? `title="${formatted.full}"` : '';
+            const truncatedClass = formatted.isTruncated ? 'truncated-combo' : '';
+            return `<div class="combo-item ${truncatedClass}" ${tooltipAttr}>
+                <span class="combo-langs">${formatted.display}</span>
                 <span class="combo-count">${combo.count}</span>
-            </div>`
-        ).join('');
+            </div>`;
+        }).join('');
     } else {
         combosContainer.innerHTML = '<span style="color: var(--color-text-secondary);">No data yet</span>';
     }
     
-    // Top successful languages
     const topLangsContainer = document.getElementById('topLanguages');
     const langSuccess = lm.byLanguageSuccess || {};
     const sorted = Object.entries(langSuccess)
@@ -552,17 +545,15 @@ function updateLanguageMatching(stats) {
         .slice(0, 8);
     
     if (sorted.length > 0) {
-        topLangsContainer.innerHTML = sorted.map(([lang, count]) => 
-            `<span class="language-tag">${lang.toUpperCase()}: ${count}</span>`
-        ).join('');
+        topLangsContainer.innerHTML = sorted.map(([lang, count]) => {
+            const langName = getLanguageDisplayName(lang);
+            return `<span class="language-tag">${langName}: ${count}</span>`;
+        }).join('');
     } else {
         topLangsContainer.innerHTML = '<span style="color: var(--text-muted);">No data yet</span>';
     }
 }
 
-/**
- * Update the per-language success rate display
- */
 function updateSelectedLangRate() {
     const langSelector = document.getElementById('langSelector');
     const rateDisplay = document.getElementById('selectedLangRate');
@@ -578,61 +569,45 @@ function updateSelectedLangRate() {
     rateDisplay.textContent = '--%';
 }
 
-/**
- * Update charts with new data
- */
 function updateCharts(stats) {
-    // Store stats for re-rendering when limit changes
     lastStats = stats;
     
-    // Source chart (doughnut with center total)
     const sourceLabels = Object.keys(stats.subtitles.bySource);
     const sourceData = Object.values(stats.subtitles.bySource);
     sourceChart.data.labels = sourceLabels.length > 0 ? sourceLabels : ['No data'];
     sourceChart.data.datasets[0].data = sourceData.length > 0 ? sourceData : [1];
-    // Use cycling colors if more than 6 sources
     sourceChart.data.datasets[0].backgroundColor = sourceLabels.map((_, i) => CHART_COLORS[i % CHART_COLORS.length]);
     sourceChart.update();
 
-    // Update language chart with current limit
     updateLanguageChart(stats);
 
-    // Timing chart
     const timingHistory = stats.timing.recentHistory || [];
     timingChart.data.labels = timingHistory.map((_, i) => `#${i + 1}`);
     timingChart.data.datasets[0].data = timingHistory;
     timingChart.update();
 }
 
-/**
- * Update language chart with current top limit
- */
 function updateLanguageChart(stats) {
     if (!stats) return;
     
-    // Language chart (horizontal bar) - Top N languages sorted by count
     const langEntries = Object.entries(stats.subtitles.byLanguage)
         .sort((a, b) => b[1] - a[1])
         .slice(0, topLanguagesCount);
     const langLabels = langEntries.map(e => e[0].toUpperCase());
     const langData = langEntries.map(e => e[1]);
     
-    // Update chart title
     const langChartTitle = document.getElementById('langChartTitle');
     if (langChartTitle) {
         langChartTitle.textContent = `Subtitles by Language (Top ${topLanguagesCount})`;
     }
     
-    // Update limit display
     const limitValue = document.getElementById('limitValue');
     if (limitValue) {
         limitValue.textContent = topLanguagesCount;
     }
     
-    // Update button states
     updateLimitButtons();
     
-    // Create gradient colors based on position
     const langColors = langEntries.map((_, i) => {
         const opacity = 1 - (i * 0.04);
         return `rgba(74, 144, 226, ${Math.max(opacity, 0.3)})`;
@@ -645,9 +620,6 @@ function updateLanguageChart(stats) {
     langChart.update();
 }
 
-/**
- * Setup limit selector buttons
- */
 function setupLimitSelector() {
     const decreaseBtn = document.getElementById('decreaseLimit');
     const increaseBtn = document.getElementById('increaseLimit');
@@ -673,9 +645,6 @@ function setupLimitSelector() {
     updateLimitButtons();
 }
 
-/**
- * Update limit button states
- */
 function updateLimitButtons() {
     const decreaseBtn = document.getElementById('decreaseLimit');
     const increaseBtn = document.getElementById('increaseLimit');
@@ -688,15 +657,12 @@ function updateLimitButtons() {
     }
 }
 
-/**
- * Update daily activity table
- */
 function updateDailyTable(stats) {
     const tbody = document.querySelector('#dailyTable tbody');
     tbody.innerHTML = '';
 
     const byDate = stats.requests.byDate || {};
-    const dates = Object.keys(byDate).sort().reverse().slice(0, 7); // Last 7 days
+    const dates = Object.keys(byDate).sort().reverse().slice(0, 7);
 
     if (dates.length === 0) {
         tbody.innerHTML = '<tr><td colspan="4" style="text-align: center;">No activity yet</td></tr>';
@@ -716,9 +682,6 @@ function updateDailyTable(stats) {
     });
 }
 
-/**
- * Update errors table
- */
 function updateErrorsTable(stats) {
     const card = document.getElementById('errorsCard');
     const tbody = document.querySelector('#errorsTable tbody');
@@ -743,13 +706,9 @@ function updateErrorsTable(stats) {
     });
 }
 
-/**
- * Setup auto-refresh
- */
 function setupAutoRefresh() {
     const toggle = document.getElementById('autoRefresh');
     
-    // Start auto-refresh
     startAutoRefresh();
 
     toggle.addEventListener('change', () => {
@@ -773,24 +732,17 @@ function stopAutoRefresh() {
     }
 }
 
-/**
- * Update last updated timestamp
- */
 function updateLastUpdated() {
     const el = document.getElementById('lastUpdated');
     el.textContent = `Updated: ${new Date().toLocaleTimeString()}`;
 }
 
-/**
- * Format date for display
- */
 function formatDate(dateStr) {
     const date = new Date(dateStr);
     const today = new Date();
     const yesterday = new Date(today);
     yesterday.setDate(yesterday.getDate() - 1);
     
-    // Use local date for comparison (YYYY-MM-DD)
     const getLocalDateStr = (d) => {
         const year = d.getFullYear();
         const month = String(d.getMonth() + 1).padStart(2, '0');
@@ -804,29 +756,16 @@ function formatDate(dateStr) {
     return date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
 }
 
-/**
- * Format timestamp for display
- */
 function formatTime(timestamp) {
     return new Date(timestamp).toLocaleTimeString();
 }
 
-/**
- * Escape HTML to prevent XSS
- */
 function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
 }
 
-// =====================================================
-// Cache Stats
-// =====================================================
-
-/**
- * Load and display cache statistics
- */
 async function loadCacheStats() {
     try {
         const response = await fetch('/api/stats/cache');
@@ -838,7 +777,6 @@ async function loadCacheStats() {
         
         const cache = await response.json();
         
-        // Update cache stat cards
         const hitRateEl = document.getElementById('cacheHitRate');
         const entriesEl = document.getElementById('cacheEntries');
         const contentEl = document.getElementById('cacheContent');
@@ -862,13 +800,6 @@ async function loadCacheStats() {
     }
 }
 
-// =====================================================
-// Provider Stats
-// =====================================================
-
-/**
- * Load and display provider statistics
- */
 async function loadProviderStats() {
     try {
         const response = await fetch('/api/stats/providers');
@@ -889,7 +820,6 @@ async function loadProviderStats() {
         }
         
         tbody.innerHTML = providers.map(p => {
-            // Determine status badge based on success rate
             let statusBadge = '<span class="badge badge-success">Online</span>';
             if (p.success_rate < 50) statusBadge = '<span class="badge badge-error">Offline</span>';
             else if (p.success_rate < 80) statusBadge = '<span class="badge badge-warning">Degraded</span>';
