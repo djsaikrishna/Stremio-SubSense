@@ -22,16 +22,16 @@
     "ass-compiler": "^0.1.16",
     "better-sqlite3": "^12.5.0",
     "chardet": "^2.1.1",
+    "cheerio": "^1.1.2",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
     "iconv-lite": "^0.7.1",
     "stremio-addon-sdk": "^1.6.10",
     "subsrt-ts": "^2.1.2",
-    "wyzie-lib": "^2.2.6"
+    "wyzie-lib": "^2.2.6",
+    "ytssubs": "^1.0.2"
   },
   "devDependencies": {
-    "cheerio": "^1.1.2",
-    "nodemon": "^3.0.2",
-    "ytssubs": "^1.0.2"
+    "nodemon": "^3.0.2"
   }
 }
