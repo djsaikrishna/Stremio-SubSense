@@ -1,0 +1,25 @@
+services:
+  subsense:
+    image: nepiraw/stremio-subsense:latest
+    container_name: stremio-subsense
+    restart: unless-stopped
+    ports:
+      - "3100:3100"
+    #env_file:
+    #  - .env
+    environment:
+      - PORT=3100
+      - SUBSENSE_BASE_URL=https://subsense.yourdomain.com
+      - LOG_LEVEL=info
+      - BETASERIES_API_KEY=${BETASERIES_API_KEY:-}
+    volumes:
+      - subsense-data:./data
+    networks:
+      - subsense-network
+
+volumes:
+  subsense-data:
+
+networks:
+  subsense-network:
+    external:true

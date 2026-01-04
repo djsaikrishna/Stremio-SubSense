@@ -48,6 +48,32 @@ app.get('/stats', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'stats.html'));
 });
 
+// Health check endpoint for Docker/Kubernetes
+app.get('/health', (req, res) => {
+    const health = {
+        status: 'ok',
+        uptime: process.uptime(),
+        timestamp: new Date().toISOString()
+    };
+    
+    // Check if stats DB is accessible
+    try {
+        const statsDB = require('./src/cache').statsDB;
+        if (statsDB) {
+            const userCount = statsDB.getActiveUsersCount(30);
+            health.database = { status: 'connected', activeUsers30d: userCount };
+        } else {
+            health.database = { status: 'not initialized' };
+        }
+    } catch (error) {
+        health.database = { status: 'error', error: error.message };
+        health.status = 'degraded';
+    }
+    
+    const statusCode = health.status === 'ok' ? 200 : 503;
+    res.status(statusCode).json(health);
+});
+
 // Stats JSON API endpoint
 app.get('/stats/json', (req, res) => {
     res.json(statsService.getStats());

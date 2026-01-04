@@ -1,0 +1,39 @@
+# Node modules (will be built in container)
+node_modules/
+
+# Development files
+.git/
+.github/
+.gitignore
+.env
+.env.*
+*.md
+README.md
+LICENSE
+
+# Test files
+tests/
+*.test.js
+*.spec.js
+
+# IDE/Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Log files
+*.log
+logs/
+
+# Data directory (SQLite databases should be mounted as volumes)
+data/
+
+# Docker files (not needed inside container)
+Dockerfile
+docker-compose*.yml
+.dockerignore
