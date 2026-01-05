@@ -3,6 +3,7 @@
  */
 const db = require('./database');
 const { log } = require('../utils');
+const { toAlpha3B } = require('../languages');
 
 /**
  * Get local date string in YYYY-MM-DD format
@@ -179,6 +180,15 @@ class StatsDB {
      */
     logRequest(data) {
         try {
+            // Normalize to alpha3B and sort alphabetically for consistent combinations
+            // (e.g., ["fr","en"], ["en","fr"], ["eng","fre"] all become ["eng","fre"])
+            const normalizedLanguages = (data.languages || [])
+                .map(lang => {
+                    const normalized = toAlpha3B(lang);
+                    return normalized || lang.toLowerCase();
+                })
+                .sort();
+            
             const stmt = db.prepare(`
                 INSERT INTO request_log 
                     (imdb_id, content_type, languages, result_count, cache_hit, response_time_ms, any_preferred_found, all_preferred_found)
@@ -187,7 +197,7 @@ class StatsDB {
             stmt.run(
                 data.imdbId,
                 data.contentType,
-                JSON.stringify(data.languages || []),
+                JSON.stringify(normalizedLanguages),
                 data.resultCount || 0,
                 data.cacheHit ? 1 : 0,
                 data.responseTimeMs || 0,
@@ -495,7 +505,7 @@ class StatsDB {
      * Get most popular language combinations
      * @param {number} days - Number of days to look back
      * @param {number} limit - Max combinations to return
-     * @returns {Array} [{ languages: 'en,fr', count: 123 }, ...]
+     * @returns {Array} [{ languages: 'ENG, FRE', count: 123 }, ...]
      */
     getPopularLanguageCombinations(days = 30, limit = 10) {
         try {
@@ -507,22 +517,39 @@ class StatsDB {
                 WHERE created_at >= strftime('%s', 'now', '-' || ? || ' days')
                 GROUP BY languages
                 ORDER BY count DESC
-                LIMIT ?
             `);
-            const rows = stmt.all(days, limit);
-            return rows.map(row => {
-                // Parse JSON array and format as comma-separated uppercase codes
+            const rows = stmt.all(days);
+            
+            // Merge combinations that have the same languages in different orders or formats
+            // (e.g., ["en","fr"], ["fr","en"], ["eng","fre"] all become "ENG, FRE")
+            const combinationMap = new Map();
+            
+            for (const row of rows) {
                 let langList;
                 try {
                     langList = JSON.parse(row.languages);
                 } catch {
                     langList = [row.languages];
                 }
-                return {
-                    languages: langList.map(l => l.toUpperCase()).join(', '),
-                    count: row.count
-                };
-            });
+                
+                // Normalize to alpha3B (3-letter ISO codes), uppercase, and sort alphabetically
+                const normalizedLangs = langList
+                    .map(l => {
+                        const normalized = toAlpha3B(l);
+                        return (normalized || l).toUpperCase();
+                    })
+                    .sort();
+                const key = normalizedLangs.join(', ');
+                
+                // Merge counts for same combination
+                combinationMap.set(key, (combinationMap.get(key) || 0) + row.count);
+            }
+            
+            // Convert map to array, sort by count, and limit
+            return Array.from(combinationMap.entries())
+                .map(([languages, count]) => ({ languages, count }))
+                .sort((a, b) => b.count - a.count)
+                .slice(0, limit);
         } catch (error) {
             log('error', '[StatsDB] GetPopularLanguageCombinations error:', error.message);
             return [];

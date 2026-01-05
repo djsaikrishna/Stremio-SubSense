@@ -140,10 +140,13 @@ async function handleSubtitles(args, config) {
             const anyPreferredFound = languages.some(lang => languageMatch?.byLanguage?.[lang]?.found);
             const allPreferredFound = languages.every(lang => languageMatch?.byLanguage?.[lang]?.found);
             
+            // Normalize language codes to alpha3B for consistent grouping
+            const normalizedLanguages = languages.map(lang => normalizeLanguageCode(lang));
+            
             statsDB.logRequest({
                 imdbId: parsed.imdbId,
                 contentType: parsed.type,
-                languages: languages,
+                languages: normalizedLanguages,
                 resultCount: formatted.length,
                 cacheHit,
                 responseTimeMs: fetchTimeMs,
