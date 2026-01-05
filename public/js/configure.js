@@ -128,12 +128,12 @@ function restoreSavedLanguages() {
                 addChip(code);
             });
         } else {
-            selectLanguage('eng');
+            selectLanguage('en');
         }
     } catch (error) {
         console.warn('Failed to restore languages from localStorage:', error);
         localStorage.removeItem(STORAGE_KEY);
-        selectLanguage('eng');
+        selectLanguage('en');
     }
 }
 

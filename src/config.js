@@ -1,4 +1,4 @@
-const { isValidLanguage } = require('./languages');
+const { isValidLanguage, toAlpha3B } = require('./languages');
 const { log } = require('./utils');
 
 // Maximum number of languages allowed
@@ -46,6 +46,13 @@ function parseConfig(config) {
             }
         }
     }
+
+    // Normalize all language codes to alpha3B format to prevent duplicates
+    // (e.g., both "en" and "eng" become "eng")
+    languages = languages.map(lang => {
+        const normalized = toAlpha3B(lang);
+        return normalized || lang;  // Keep original if normalization fails
+    });
 
     // Remove duplicates while preserving order
     languages = [...new Set(languages)];
