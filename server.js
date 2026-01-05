@@ -87,7 +87,7 @@ app.get('/api/version', (req, res) => {
 
 // Languages API endpoint (for dynamic language list in configuration UI)
 app.get('/api/languages', (req, res) => {
-    const { getSupportedLanguages, LANGUAGE_TABLE } = require('./src/languages');
+    const { getSupportedLanguages, LANGUAGE_TABLE, SPECIAL_CODE_MAPPINGS, getByAnyCode } = require('./src/languages');
     
     // Support different formats via query param
     const format = req.query.format || 'simple';
@@ -102,10 +102,27 @@ app.get('/api/languages', (req, res) => {
             nativeName: lang.nativeName,
             providerCodes: lang.providerCodes
         })));
+    } else if (format === 'lookup') {
+        const lookup = {};
+        LANGUAGE_TABLE.forEach(lang => {
+            const name = lang.name;
+            if (lang.alpha2) lookup[lang.alpha2.toLowerCase()] = name;
+            if (lang.alpha3B) lookup[lang.alpha3B.toLowerCase()] = name;
+            if (lang.alpha3T) lookup[lang.alpha3T.toLowerCase()] = name;
+        });
+        Object.entries(SPECIAL_CODE_MAPPINGS).forEach(([code, mappedCode]) => {
+            const lang = getByAnyCode(mappedCode);
+            if (lang) {
+                lookup[code.toLowerCase()] = lang.name;
+            }
+        });
+        res.json(lookup);
     } else {
         // Simple format for configure.js dropdown (code + name)
+        // Use alpha2 as the unique identifier since alpha3B can be duplicated
+        // (e.g., Portuguese and Portuguese Brazil both have alpha3B='por')
         res.json(LANGUAGE_TABLE.map(lang => ({
-            code: lang.alpha3B,  // Use alpha3B for Stremio compatibility
+            code: lang.alpha2,  // Use alpha2 for unique identification (pt vs pt-BR)
             name: lang.name
         })));
     }
@@ -274,6 +291,7 @@ app.get('/api/stats/sessions', (req, res) => {
             
             // Calculate number of days to show
             const daysToShow = days;
+            const nowTs = Math.floor(now.getTime() / 1000);
             
             // Generate daily points from oldest to today
             for (let d = daysToShow - 1; d >= 0; d--) {
@@ -284,9 +302,11 @@ app.get('/api/stats/sessions', (req, res) => {
                 const endTs = getMidnight(dayEnd);
                 
                 const isToday = d === 0;
+                const actualEndTs = isToday ? nowTs : endTs;
+                
                 breakdown.intervals.push({
                     label: isToday ? formatDate(dayStart) + ' (today)' : formatDate(dayStart),
-                    value: statsDB.getActiveUsersOnDay(startTs, endTs)
+                    value: statsDB.getActiveUsersOnDay(startTs, actualEndTs)
                 });
             }
         }

@@ -13,15 +13,11 @@ const REFRESH_INTERVAL_MS = 30000;
 let languageLookup = {};
 
 async function loadLanguageLookup() {
-    try {
-        const response = await fetch('/api/languages');
+    try {        // Use the lookup format which returns a flat code-to-name object
+        // including all code formats and special provider mappings
+        const response = await fetch('/api/languages?format=lookup');
         if (response.ok) {
-            const languages = await response.json();
-            languages.forEach(lang => {
-                if (lang.code) {
-                    languageLookup[lang.code.toLowerCase()] = lang.name;
-                }
-            });
+            languageLookup = await response.json();
             console.log(`Loaded ${Object.keys(languageLookup).length} language names for stats display`);
         }
     } catch (error) {
@@ -597,7 +593,7 @@ function updateLanguageChart(stats) {
     const langEntries = Object.entries(stats.subtitles.byLanguage)
         .sort((a, b) => b[1] - a[1])
         .slice(0, topLanguagesCount);
-    const langLabels = langEntries.map(e => e[0].toUpperCase());
+    const langLabels = langEntries.map(e => getLanguageDisplayName(e[0]));
     const langData = langEntries.map(e => e[1]);
     
     const langChartTitle = document.getElementById('langChartTitle');

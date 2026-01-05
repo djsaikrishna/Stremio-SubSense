@@ -5,6 +5,12 @@
 let currentPage = 1;
 const PAGE_SIZE = 20;
 
+const MAX_TEST_LANGUAGES = 5;
+let testSelectedLanguages = [];
+let testLanguages = [];
+let testLanguageLookup = {};
+let testHighlightIndex = -1;
+
 function refreshTruncatedCells(container = document) {
     const cells = container.querySelectorAll('.data-table td');
     cells.forEach(cell => {
@@ -30,11 +36,26 @@ function refreshTruncatedCells(container = document) {
     });
 }
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+    await loadLanguageLookup();
+    
     fetchVersion();
     loadRecentContent();
     setupSearchHandlers();
+    await initTestSearch();
 });
+
+async function loadLanguageLookup() {
+    try {
+        const response = await fetch('/api/languages?format=lookup');
+        if (response.ok) {
+            testLanguageLookup = await response.json();
+            console.log(`[Content] Loaded ${Object.keys(testLanguageLookup).length} language lookup entries`);
+        }
+    } catch (error) {
+        console.warn('Failed to load language lookup:', error);
+    }
+}
 
 async function fetchVersion() {
     try {
@@ -187,9 +208,10 @@ function displaySearchResult(data) {
     
     breakdownBody.innerHTML = sortedLangs.map(([lang, info]) => {
         const sources = [...info.sources].join(', ');
+        const langName = getLanguageDisplayName(lang);
         return `
             <tr>
-                <td><span class="language-tag">${lang.toUpperCase()}</span></td>
+                <td><span class="language-tag">${langName}</span></td>
                 <td>${info.count}</td>
                 <td>${sources}</td>
                 <td>${formatAge(info.lastUpdated)}</td>
@@ -334,4 +356,409 @@ function formatAge(timestamp) {
     if (age < 604800) return `${Math.floor(age / 86400)}d ago`;
     
     return new Date(timestamp * 1000).toLocaleDateString();
+}
+
+async function initTestSearch() {
+    try {
+        const response = await fetch('/api/languages?format=full');
+        if (response.ok) {
+            const languages = await response.json();
+            testLanguages = languages.map(lang => ({
+                code: lang.alpha2,
+                name: lang.name
+            }));
+            console.log(`[TestSearch] Loaded ${testLanguages.length} languages for selector`);
+        }
+    } catch (error) {
+        console.warn('Failed to fetch languages:', error);
+        testLanguages = [
+            { code: 'eng', name: 'English' },
+            { code: 'fre', name: 'French' },
+            { code: 'spa', name: 'Spanish' }
+        ];
+    }
+    
+    setupTestSearchHandlers();
+    renderTestOptions();
+}
+
+function setupTestSearchHandlers() {
+    const container = document.getElementById('testMultiselectContainer');
+    const input = document.getElementById('testLanguageInput');
+    const imdbInput = document.getElementById('testImdbInput');
+    const seasonInput = document.getElementById('testSeasonInput');
+    const episodeInput = document.getElementById('testEpisodeInput');
+    const searchBtn = document.getElementById('testSearchBtn');
+    const hint = document.getElementById('testSearchHint');
+    
+    input.addEventListener('focus', () => {
+        container.classList.add('active');
+        renderTestOptions(input.value);
+    });
+    
+    input.addEventListener('input', () => {
+        renderTestOptions(input.value);
+    });
+    
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Backspace' && input.value === '' && testSelectedLanguages.length > 0) {
+            removeTestLanguage(testSelectedLanguages[testSelectedLanguages.length - 1]);
+        }
+        if (e.key === 'Escape') {
+            container.classList.remove('active');
+            input.blur();
+        }
+    });
+    
+    document.addEventListener('click', (e) => {
+        if (!container.contains(e.target)) {
+            container.classList.remove('active');
+        }
+    });
+    
+    imdbInput.addEventListener('input', () => {
+        validateTestForm();
+    });
+    
+    seasonInput.addEventListener('input', validateTestForm);
+    episodeInput.addEventListener('input', validateTestForm);
+    
+    [seasonInput, episodeInput].forEach(input => {
+        input.addEventListener('keypress', (e) => {
+            if (!/[0-9]/.test(e.key) && !['Backspace', 'Delete', 'Tab', 'Enter', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+                e.preventDefault();
+            }
+        });
+        
+        input.addEventListener('paste', (e) => {
+            e.preventDefault();
+            const text = (e.clipboardData || window.clipboardData).getData('text');
+            const numericOnly = text.replace(/[^0-9]/g, '');
+            input.value = numericOnly.slice(0, 5);
+            validateTestForm();
+        });
+        
+        input.addEventListener('blur', () => {
+            const val = parseInt(input.value, 10);
+            const min = parseInt(input.min, 10) || 1;
+            const max = parseInt(input.max, 10) || 99;
+            if (!isNaN(val)) {
+                if (val < min) input.value = min;
+                if (val > max) input.value = max;
+            }
+        });
+    });
+    
+    searchBtn.addEventListener('click', performTestSearch);
+    
+    imdbInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter' && !searchBtn.disabled) {
+            performTestSearch();
+        }
+    });
+    
+    document.querySelectorAll('.number-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const targetId = btn.dataset.target;
+            const input = document.getElementById(targetId);
+            const currentVal = parseInt(input.value, 10) || 0;
+            const min = parseInt(input.min, 10) || 1;
+            const max = parseInt(input.max, 10) || 999;
+            
+            if (btn.classList.contains('number-up')) {
+                input.value = Math.min(currentVal + 1, max);
+            } else {
+                input.value = Math.max(currentVal - 1, min);
+                if (currentVal <= min) input.value = '';
+            }
+            
+            validateTestForm();
+        });
+    });
+}
+
+function validateTestForm() {
+    const imdbInput = document.getElementById('testImdbInput');
+    const searchBtn = document.getElementById('testSearchBtn');
+    const hint = document.getElementById('testSearchHint');
+    
+    const imdbValue = imdbInput.value.trim().toLowerCase();
+    const isValidImdb = /^tt\d{7,8}$/.test(imdbValue);
+    const hasLanguages = testSelectedLanguages.length > 0;
+    
+    if (imdbValue.length === 0) {
+        hint.textContent = 'Enter a valid IMDB ID and select at least one language';
+        hint.style.color = 'var(--color-text-muted)';
+    } else if (!isValidImdb && imdbValue.startsWith('tt') && imdbValue.length < 9) {
+        hint.textContent = `Keep typing... (need ${9 - imdbValue.length} more digits)`;
+        hint.style.color = 'var(--color-accent-blue)';
+    } else if (!isValidImdb) {
+        hint.textContent = '✗ Invalid IMDB format. Expected: tt followed by 7-8 digits';
+        hint.style.color = '#e74c3c';
+    } else if (!hasLanguages) {
+        hint.textContent = '✓ Valid IMDB ID. Now select at least one language.';
+        hint.style.color = 'var(--color-warning)';
+    } else {
+        hint.textContent = '✓ Ready to search!';
+        hint.style.color = '#2ecc71';
+    }
+    
+    searchBtn.disabled = !(isValidImdb && hasLanguages);
+}
+
+function renderTestOptions(filterText = '') {
+    const optionsList = document.getElementById('testOptionsList');
+    const lowerFilter = (filterText || '').toLowerCase();
+    
+    const filtered = testLanguages.filter(lang => 
+        lang.name.toLowerCase().includes(lowerFilter) ||
+        lang.code.toLowerCase().includes(lowerFilter)
+    );
+    
+    if (filtered.length === 0) {
+        optionsList.innerHTML = '<div class="option-item disabled" style="cursor: default; color: var(--color-text-secondary);">No languages found</div>';
+        return;
+    }
+    
+    optionsList.innerHTML = filtered.map(lang => {
+        const isSelected = testSelectedLanguages.includes(lang.code);
+        return `
+            <div class="option-item ${isSelected ? 'selected' : ''}" data-code="${lang.code}">
+                <span>${lang.name}</span>
+                <span class="check-mark">✓</span>
+            </div>
+        `;
+    }).join('');
+    
+    optionsList.querySelectorAll('.option-item').forEach(item => {
+        item.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const code = item.dataset.code;
+            if (testSelectedLanguages.includes(code)) {
+                removeTestLanguage(code);
+            } else if (testSelectedLanguages.length < MAX_TEST_LANGUAGES) {
+                selectTestLanguage(code);
+            }
+        });
+    });
+}
+
+function selectTestLanguage(code) {
+    if (testSelectedLanguages.includes(code) || testSelectedLanguages.length >= MAX_TEST_LANGUAGES) {
+        return;
+    }
+    
+    testSelectedLanguages.push(code);
+    addTestChip(code);
+    renderTestOptions(document.getElementById('testLanguageInput').value);
+    validateTestForm();
+    
+    document.getElementById('testLanguageInput').value = '';
+}
+
+function removeTestLanguage(code) {
+    const index = testSelectedLanguages.indexOf(code);
+    if (index > -1) {
+        testSelectedLanguages.splice(index, 1);
+        removeTestChip(code);
+        renderTestOptions(document.getElementById('testLanguageInput').value);
+        validateTestForm();
+    }
+}
+
+function addTestChip(code) {
+    const wrapper = document.getElementById('testInputWrapper');
+    const input = document.getElementById('testLanguageInput');
+    const lang = testLanguages.find(l => l.code === code);
+    
+    const chip = document.createElement('div');
+    chip.className = 'multi-select-chip';
+    chip.dataset.code = code;
+    chip.innerHTML = `
+        <span>${lang ? lang.name : code.toUpperCase()}</span>
+        <button type="button" class="remove-chip" aria-label="Remove">×</button>
+    `;
+    
+    chip.querySelector('.remove-chip').addEventListener('click', (e) => {
+        e.stopPropagation();
+        removeTestLanguage(code);
+    });
+    
+    wrapper.insertBefore(chip, input);
+}
+
+function removeTestChip(code) {
+    const chip = document.querySelector(`#testInputWrapper .multi-select-chip[data-code="${code}"]`);
+    if (chip) {
+        chip.classList.add('flash-remove');
+        setTimeout(() => chip.remove(), 300);
+    }
+}
+
+async function performTestSearch() {
+    const imdbInput = document.getElementById('testImdbInput');
+    const seasonInput = document.getElementById('testSeasonInput');
+    const episodeInput = document.getElementById('testEpisodeInput');
+    const searchBtn = document.getElementById('testSearchBtn');
+    const resultsContainer = document.getElementById('testResultsContainer');
+    
+    const imdbId = imdbInput.value.trim().toLowerCase();
+    const season = seasonInput.value ? parseInt(seasonInput.value, 10) : null;
+    const episode = episodeInput.value ? parseInt(episodeInput.value, 10) : null;
+    
+    if (testSelectedLanguages.length === 0 || !/^tt\d{7,8}$/.test(imdbId)) {
+        return;
+    }
+    
+    searchBtn.classList.add('loading');
+    searchBtn.querySelector('.btn-text').style.display = 'none';
+    searchBtn.querySelector('.btn-spinner').style.display = 'inline-flex';
+    searchBtn.disabled = true;
+    resultsContainer.style.display = 'none';
+    
+    try {
+        const config = {
+            languages: testSelectedLanguages,
+            maxSubtitles: 0
+        };
+        const encodedConfig = encodeURIComponent(JSON.stringify(config));
+        
+        let contentId = imdbId;
+        let contentType = 'movie';
+        if (season !== null && episode !== null) {
+            contentId = `${imdbId}:${season}:${episode}`;
+            contentType = 'series';
+        }
+        
+        const addonUrl = `/${encodedConfig}/subtitles/${contentType}/${contentId}.json`;
+        console.log('[TestSearch] Fetching:', addonUrl);
+        
+        const fetchResponse = await fetch(addonUrl);
+        const fetchData = await fetchResponse.json();
+        console.log('[TestSearch] Got', fetchData.subtitles?.length || 0, 'subtitles');
+        
+        displayTestResultsFromFetch(fetchData, testSelectedLanguages);
+        
+    } catch (error) {
+        console.error('[TestSearch] Error:', error);
+        displayTestError('Failed to fetch subtitles. Please try again.');
+    } finally {
+        searchBtn.classList.remove('loading');
+        searchBtn.querySelector('.btn-text').style.display = 'inline';
+        searchBtn.querySelector('.btn-spinner').style.display = 'none';
+        searchBtn.disabled = false;
+        validateTestForm();
+    }
+}
+
+function displayTestResultsFromFetch(data, selectedLangs) {
+    const container = document.getElementById('testResultsContainer');
+    const content = document.getElementById('testResultsContent');
+    const totalBadge = document.getElementById('testResultsTotal');
+    const title = document.getElementById('testResultsTitle');
+    
+    const subtitles = data.subtitles || [];
+    
+    const langGroups = {};
+    subtitles.forEach(sub => {
+        const lang = sub.lang || 'unknown';
+        if (!langGroups[lang]) {
+            langGroups[lang] = {
+                count: 0,
+                sources: {}
+            };
+        }
+        langGroups[lang].count++;
+        
+        const source = sub.source || 'unknown';
+        if (!langGroups[lang].sources[source]) {
+            langGroups[lang].sources[source] = 0;
+        }
+        langGroups[lang].sources[source]++;
+    });
+    
+    const total = subtitles.length;
+    totalBadge.textContent = `${total} subtitle${total !== 1 ? 's' : ''}`;
+    title.textContent = `Results - ${total} subtitles found`;
+    
+    if (total === 0) {
+        content.innerHTML = `
+            <div class="test-no-results">
+                <svg viewBox="0 0 24 24">
+                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
+                </svg>
+                <p>No subtitles found for the selected languages.</p>
+            </div>
+        `;
+    } else {
+        const langHtml = Object.entries(langGroups)
+            .sort((a, b) => b[1].count - a[1].count)
+            .map(([lang, info]) => {
+                const langName = getLanguageDisplayName(lang);
+                const sourcesHtml = Object.entries(info.sources)
+                    .sort((a, b) => b[1] - a[1])
+                    .map(([source, count]) => `
+                        <div class="test-source-item">
+                            <span class="test-source-name">${source}</span>
+                            <span class="test-source-count">${count}</span>
+                        </div>
+                    `).join('');
+                
+                return `
+                    <div class="test-lang-accordion">
+                        <div class="test-lang-header" onclick="this.parentElement.classList.toggle('expanded')">
+                            <div class="test-lang-header-left">
+                                <svg class="test-lang-chevron" viewBox="0 0 24 24">
+                                    <path d="M8.59 16.59L13.17 12 8.59 7.41 10 6l6 6-6 6-1.41-1.41z"/>
+                                </svg>
+                                <span class="test-lang-name">${langName}</span>
+                            </div>
+                            <span class="test-lang-count">${info.count}</span>
+                        </div>
+                        <div class="test-lang-sources">
+                            ${sourcesHtml}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        
+        content.innerHTML = langHtml;
+    }
+    
+    container.style.display = 'block';
+    container.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function displayTestError(message) {
+    const container = document.getElementById('testResultsContainer');
+    const content = document.getElementById('testResultsContent');
+    const totalBadge = document.getElementById('testResultsTotal');
+    const title = document.getElementById('testResultsTitle');
+    
+    title.textContent = 'Error';
+    totalBadge.textContent = 'Failed';
+    totalBadge.style.background = 'var(--color-error-bg)';
+    totalBadge.style.color = '#EF5350';
+    
+    content.innerHTML = `
+        <div class="test-no-results">
+            <svg viewBox="0 0 24 24" style="fill: #EF5350;">
+                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
+            </svg>
+            <p style="color: #EF5350;">${message}</p>
+        </div>
+    `;
+    
+    container.style.display = 'block';
+    
+    setTimeout(() => {
+        totalBadge.style.background = '';
+        totalBadge.style.color = '';
+    }, 5000);
+}
+
+function getLanguageDisplayName(langCode) {
+    if (!langCode) return langCode;
+    const lowerCode = langCode.toLowerCase();
+    return testLanguageLookup[lowerCode] || langCode.toUpperCase();
 }

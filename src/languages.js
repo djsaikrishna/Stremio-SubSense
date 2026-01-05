@@ -341,6 +341,23 @@ function getByBetaseriesCode(code) {
 }
 
 /**
+ * Special code mappings for provider-specific codes not in ISO standards
+ * OpenSubtitles and other providers use non-standard codes
+ */
+const SPECIAL_CODE_MAPPINGS = {
+    'pb': 'pt-BR',      // OpenSubtitles Brazilian Portuguese
+    'pob': 'pt-BR',     // Alternative Brazilian Portuguese
+    'cn': 'zh',         // Chinese (simplified shorthand)
+    'tw': 'zh',         // Chinese (Taiwan/Traditional)
+    'br': 'pt-BR',      // Brazilian Portuguese (TVsubtitles)
+    'gr': 'el',         // Greek (TVsubtitles uses 'gr' instead of 'el')
+    'nb': 'no',         // Norwegian Bokmål -> Norwegian
+    'nn': 'no',         // Norwegian Nynorsk -> Norwegian
+    'ze': 'zh',         // Chinese (simplified - legacy)
+    'zt': 'zh',         // Chinese (traditional - legacy)
+};
+
+/**
  * Universal lookup - tries all code types
  * @param {string} code - Any language code
  * @returns {Object|null} Language object or null
@@ -348,6 +365,12 @@ function getByBetaseriesCode(code) {
 function getByAnyCode(code) {
     if (!code) return null;
     const lowerCode = code.toLowerCase();
+    
+    // Check special mappings first
+    if (SPECIAL_CODE_MAPPINGS[lowerCode]) {
+        const mappedCode = SPECIAL_CODE_MAPPINGS[lowerCode];
+        return getByAlpha2(mappedCode) || getByAlpha3B(mappedCode);
+    }
     
     // Try in order of specificity
     return getByAlpha3B(lowerCode) ||
@@ -493,14 +516,18 @@ function mapWyzieToStremio(wyzieCode) {
 }
 
 /**
- * Map Stremio (3-letter) to Wyzie (2-letter)
- * Backwards compatibility alias
- * @param {string} stremioCode - 3-letter code
- * @returns {string|null} 2-letter code
+ * Map Stremio/config code to Wyzie (2-letter base)
+ * Strips region codes since Wyzie only accepts base 2-letter codes
+ * e.g., "pt-BR" → "pt", "zh-TW" → "zh"
+ * @param {string} code - Any language code (2-letter, 3-letter, or with region)
+ * @returns {string|null} Base 2-letter code for Wyzie API
  */
-function mapStremioToWyzie(stremioCode) {
-    if (!stremioCode || stremioCode === 'none') return null;
-    return toAlpha2(stremioCode);
+function mapStremioToWyzie(code) {
+    if (!code || code === 'none') return null;
+    const alpha2 = toAlpha2(code);
+    if (!alpha2) return null;
+    // Strip region code if present (e.g., "pt-BR" → "pt")
+    return alpha2.split('-')[0].toLowerCase();
 }
 
 /**
@@ -539,6 +566,7 @@ function getSupportedLanguages() {
 module.exports = {
     // Master data
     LANGUAGE_TABLE,
+    SPECIAL_CODE_MAPPINGS,
     
     // Lookup functions
     getByAlpha2,

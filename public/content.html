@@ -35,7 +35,7 @@
                 <svg class="section-icon" viewBox="0 0 24 24">
                     <path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
                 </svg>
-                Search Content
+                Search Cached Content
             </h2>
             <div class="search-container">
                 <input type="text" id="imdbSearch" class="search-input" placeholder="Enter IMDB ID (e.g., tt0111161)" maxlength="10">
@@ -131,6 +131,86 @@
             <p style="margin-top: 16px; font-size: 0.9rem; color: var(--color-text-muted);">
                 This content hasn't been requested yet, or its cache has expired.
             </p>
+        </div>
+
+        <div class="card" id="testSearchCard">
+            <h2>
+                <svg class="section-icon" viewBox="0 0 24 24">
+                    <path d="M20 2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h14l4 4V4c0-1.1-.9-2-2-2zm-2 12H6v-2h12v2zm0-3H6V9h12v2zm0-3H6V6h12v2z"/>
+                </svg>
+                Test Subtitle Request
+            </h2>
+            <p style="color: var(--color-text-secondary); margin-bottom: 20px;">
+                Test subtitle fetching for any IMDB ID. Results are cached and displayed by language and source.
+            </p>
+            
+            <div class="form-group" style="margin-bottom: 20px;">
+                <label for="testLanguageInput">Languages <span class="label-hint">(select up to 5)</span></label>
+                <div class="multiselect-container" id="testMultiselectContainer">
+                    <div class="multiselect-input-wrapper" id="testInputWrapper">
+                        <input type="text" id="testLanguageInput" placeholder="Search languages..." autocomplete="off">
+                    </div>
+                    <div class="multiselect-dropdown" id="testDropdownList">
+                        <div class="options-list" id="testOptionsList"></div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="test-search-row">
+                <div class="test-input-group test-input-imdb">
+                    <label for="testImdbInput">IMDB ID</label>
+                    <input type="text" id="testImdbInput" class="test-input" placeholder="tt1234567" maxlength="10">
+                </div>
+                <div class="test-input-group test-input-season">
+                    <label for="testSeasonInput">Season</label>
+                    <div class="number-input-wrapper">
+                        <input type="number" id="testSeasonInput" class="test-input" placeholder="#" min="1" max="99">
+                        <div class="number-controls">
+                            <button type="button" class="number-btn number-up" data-target="testSeasonInput">
+                                <svg viewBox="0 0 24 24"><path d="M7 14l5-5 5 5z"/></svg>
+                            </button>
+                            <button type="button" class="number-btn number-down" data-target="testSeasonInput">
+                                <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <div class="test-input-group test-input-episode">
+                    <label for="testEpisodeInput">Episode</label>
+                    <div class="number-input-wrapper">
+                        <input type="number" id="testEpisodeInput" class="test-input" placeholder="#" min="1" max="999">
+                        <div class="number-controls">
+                            <button type="button" class="number-btn number-up" data-target="testEpisodeInput">
+                                <svg viewBox="0 0 24 24"><path d="M7 14l5-5 5 5z"/></svg>
+                            </button>
+                            <button type="button" class="number-btn number-down" data-target="testEpisodeInput">
+                                <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <div class="test-input-group test-input-btn">
+                    <label>&nbsp;</label>
+                    <button id="testSearchBtn" class="test-search-btn" disabled>
+                        <span class="btn-text">Request</span>
+                        <span class="btn-spinner" style="display: none;">
+                            <div class="loading-spinner"></div>
+                        </span>
+                    </button>
+                </div>
+            </div>
+            <p id="testSearchHint" class="hint-text" style="margin-top: 8px;">Enter a valid IMDB ID and select at least one language</p>
+            <p class="hint-text" style="margin-top: 4px; font-size: 0.8rem; opacity: 0.7;">💡 For TV series, make sure to enter both Season and Episode numbers to get results.</p>
+            
+            <div id="testResultsContainer" style="display: none; margin-top: 24px;">
+                <div class="test-results-header">
+                    <h4 id="testResultsTitle">Results</h4>
+                    <span class="test-results-badge" id="testResultsTotal">0 subtitles</span>
+                </div>
+                
+                <div id="testResultsContent" class="test-results-content">
+                </div>
+            </div>
         </div>
 
         <div class="card">
