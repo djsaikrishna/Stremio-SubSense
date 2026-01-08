@@ -225,6 +225,7 @@ const _indexByName = new Map();
 const _indexByYify = new Map();
 const _indexByTvsubtitles = new Map();
 const _indexByBetaseries = new Map();
+const _indexBySubsource = new Map();
 
 LANGUAGE_TABLE.forEach((lang, idx) => {
     _indexByAlpha2.set(lang.alpha2.toLowerCase(), idx);
@@ -247,8 +248,45 @@ LANGUAGE_TABLE.forEach((lang, idx) => {
         if (lang.providerCodes.betaseries) {
             _indexByBetaseries.set(lang.providerCodes.betaseries.toLowerCase(), idx);
         }
+        if (lang.providerCodes.subsource) {
+            _indexBySubsource.set(lang.providerCodes.subsource.toLowerCase(), idx);
+        }
     }
 });
+
+// SubSource uses full lowercase language names - map from alpha2 to subsource code
+// This allows lookup even when providerCodes.subsource isn't explicitly set
+const SUBSOURCE_LANGUAGE_MAP = {
+    'en': 'english', 'fr': 'french', 'es': 'spanish', 'de': 'german',
+    'pt': 'portuguese', 'ar': 'arabic', 'ja': 'japanese', 'ko': 'korean',
+    'zh': 'chinese', 'it': 'italian', 'nl': 'dutch', 'ru': 'russian',
+    'pl': 'polish', 'tr': 'turkish', 'sv': 'swedish', 'no': 'norwegian',
+    'da': 'danish', 'fi': 'finnish', 'el': 'greek', 'he': 'hebrew',
+    'hu': 'hungarian', 'cs': 'czech', 'ro': 'romanian', 'th': 'thai',
+    'vi': 'vietnamese', 'id': 'indonesian', 'ms': 'malay', 'hi': 'hindi',
+    'bn': 'bengali', 'ta': 'tamil', 'te': 'telugu', 'fa': 'farsi_persian',
+    'uk': 'ukrainian', 'bg': 'bulgarian', 'hr': 'croatian', 'sr': 'serbian',
+    'sk': 'slovak', 'sl': 'slovenian', 'is': 'icelandic', 'et': 'estonian',
+    'lv': 'latvian', 'lt': 'lithuanian', 'ka': 'georgian', 'mk': 'macedonian',
+    'bs': 'bosnian', 'sq': 'albanian', 'ca': 'catalan', 'eu': 'basque',
+    'gl': 'galician', 'cy': 'welsh', 'sw': 'swahili', 'tl': 'tagalog',
+    'ml': 'malayalam', 'kn': 'kannada', 'mr': 'marathi', 'gu': 'gujarati',
+    'pa': 'punjabi', 'ur': 'urdu', 'ne': 'nepali', 'si': 'sinhala',
+    'km': 'khmer', 'lo': 'lao', 'my': 'burmese', 'mn': 'mongolian'
+};
+
+// Regional variants for SubSource
+const SUBSOURCE_REGIONAL_MAP = {
+    'pt-br': 'brazilian_portuguese',
+    'pt-pt': 'portuguese',
+    'zh-cn': 'chinese_simplified',
+    'zh-tw': 'chinese_traditional',
+    'zh-hk': 'chinese_cantonese',
+    'es-mx': 'spanish_latin_america',
+    'es-es': 'spanish_spain',
+    'fr-ca': 'french_canada',
+    'fr-fr': 'french_france'
+};
 
 // ============================================================
 // LOOKUP FUNCTIONS
@@ -338,6 +376,45 @@ function getByBetaseriesCode(code) {
     if (!code) return null;
     const idx = _indexByBetaseries.get(code.toLowerCase());
     return idx !== undefined ? LANGUAGE_TABLE[idx] : null;
+}
+
+/**
+ * Get language by SubSource code
+ * @param {string} code - SubSource code (e.g., 'english', 'french', 'brazilian_portuguese')
+ * @returns {Object|null} Language object or null
+ */
+function getBySubsourceCode(code) {
+    if (!code) return null;
+    const lower = code.toLowerCase();
+    
+    // First check explicit providerCodes.subsource
+    const idx = _indexBySubsource.get(lower);
+    if (idx !== undefined) return LANGUAGE_TABLE[idx];
+    
+    // Then check by language name (SubSource uses lowercase names)
+    const nameIdx = _indexByName.get(lower);
+    if (nameIdx !== undefined) return LANGUAGE_TABLE[nameIdx];
+    
+    // Handle regional variants (e.g., 'brazilian_portuguese' -> Portuguese)
+    // Map SubSource regional codes back to their base language
+    const SUBSOURCE_REGIONAL_TO_BASE = {
+        'brazilian_portuguese': 'pt',
+        'chinese_simplified': 'zh',
+        'chinese_traditional': 'zh',
+        'chinese_cantonese': 'zh',
+        'spanish_latin_america': 'es',
+        'spanish_spain': 'es',
+        'french_canada': 'fr',
+        'french_france': 'fr'
+    };
+    
+    if (SUBSOURCE_REGIONAL_TO_BASE[lower]) {
+        const baseAlpha2 = SUBSOURCE_REGIONAL_TO_BASE[lower];
+        const baseIdx = _indexByAlpha2.get(baseAlpha2);
+        if (baseIdx !== undefined) return LANGUAGE_TABLE[baseIdx];
+    }
+    
+    return null;
 }
 
 /**
@@ -438,6 +515,45 @@ function toBetaseriesCode(code) {
     const lang = getByAnyCode(code);
     if (!lang) return null;
     return lang.providerCodes?.betaseries || null;
+}
+
+/**
+ * Convert any code to SubSource format
+ * SubSource uses full lowercase language names (e.g., 'english', 'french')
+ * Also handles regional variants (e.g., 'pt-br' -> 'brazilian_portuguese')
+ * @param {string} code - Any language code (ISO or regional like 'pt-br')
+ * @returns {string|null} SubSource code or null
+ */
+function toSubsourceCode(code) {
+    if (!code) return null;
+    const lower = code.toLowerCase();
+    
+    // Check regional variants first
+    if (SUBSOURCE_REGIONAL_MAP[lower]) {
+        return SUBSOURCE_REGIONAL_MAP[lower];
+    }
+    
+    // Check direct alpha2 mapping
+    if (SUBSOURCE_LANGUAGE_MAP[lower]) {
+        return SUBSOURCE_LANGUAGE_MAP[lower];
+    }
+    
+    // Try to get language from any code format
+    const lang = getByAnyCode(code);
+    if (!lang) return null;
+    
+    // Check if providerCodes.subsource is defined
+    if (lang.providerCodes?.subsource) {
+        return lang.providerCodes.subsource;
+    }
+    
+    // Fall back to language map using alpha2
+    if (SUBSOURCE_LANGUAGE_MAP[lang.alpha2]) {
+        return SUBSOURCE_LANGUAGE_MAP[lang.alpha2];
+    }
+    
+    // Last resort: lowercase language name (may or may not work)
+    return lang.name.toLowerCase();
 }
 
 /**
@@ -567,6 +683,8 @@ module.exports = {
     // Master data
     LANGUAGE_TABLE,
     SPECIAL_CODE_MAPPINGS,
+    SUBSOURCE_LANGUAGE_MAP,
+    SUBSOURCE_REGIONAL_MAP,
     
     // Lookup functions
     getByAlpha2,
@@ -576,6 +694,7 @@ module.exports = {
     getByYifyCode,
     getByTvsubtitlesCode,
     getByBetaseriesCode,
+    getBySubsourceCode,
     getByAnyCode,
     
     // Conversion functions
@@ -584,6 +703,7 @@ module.exports = {
     toYifyCode,
     toTvsubtitlesCode,
     toBetaseriesCode,
+    toSubsourceCode,
     getDisplayName,
     getNativeName,
     

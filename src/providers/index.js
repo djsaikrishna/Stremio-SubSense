@@ -32,6 +32,7 @@ const WyzieProvider = require('./WyzieProvider');
 const BetaSeriesProvider = require('./BetaSeriesProvider');
 const YIFYProvider = require('./YIFYProvider');
 const TVsubtitlesProvider = require('./TVsubtitlesProvider');
+const SubSourceProvider = require('./SubSourceProvider');
 
 /**
  * Check if a provider is enabled in SUBTITLE_SOURCES
@@ -69,6 +70,11 @@ function initializeDefaultProviders() {
     if (!providerManager.get('tvsubtitles') && isProviderEnabled('tvsubtitles')) {
         providerManager.register(new TVsubtitlesProvider());
     }
+    
+    // SubSource provider - requires user API key per request
+    if (!providerManager.get('subsource') && isProviderEnabled('subsource')) {
+        providerManager.register(new SubSourceProvider());
+    }
 }
 
 initializeDefaultProviders();
@@ -78,5 +84,6 @@ module.exports = {
     WyzieProvider,
     BetaSeriesProvider,
     YIFYProvider,
-    TVsubtitlesProvider
+    TVsubtitlesProvider,
+    SubSourceProvider
 };

@@ -4,6 +4,15 @@ const { mapStremioToWyzie, mapWyzieToStremio, normalizeLanguageCode } = require(
 const statsService = require('./stats');
 const { isAssFormat } = require('./services/subtitle-converter');
 
+// Crypto utilities for encrypting API keys in download URLs
+let encryptConfig = null;
+try {
+    const crypto = require('./utils/crypto');
+    encryptConfig = crypto.encryptConfig;
+} catch (err) {
+    log('warn', '[Subtitles] Crypto module not available, SubSource downloads will fail');
+}
+
 const MAX_SUBTITLES = parseInt(process.env.MAX_SUBTITLES, 10) || 30;
 
 // Cache modules
@@ -41,6 +50,18 @@ async function handleSubtitles(args, config) {
         const parsed = parseStremioId(args.id);
         log('debug', `[Subtitles] Parsed ID: imdb=${parsed.imdbId}, season=${parsed.season}, episode=${parsed.episode}`);
 
+        // Extract Stremio extra parameters (video file info)
+        const stremioExtra = args.extra || {};
+        const videoContext = {
+            videoHash: stremioExtra.videoHash || null,      // OpenSubtitles-style hash
+            videoSize: stremioExtra.videoSize || null,      // File size in bytes
+            filename: stremioExtra.filename || null         // User's video filename - Filename similarity ranking
+        };
+        
+        if (videoContext.filename) {
+            log('debug', `[Subtitles] Video context: filename="${videoContext.filename}", hash=${videoContext.videoHash ? 'present' : 'none'}`);
+        }
+
         // Get languages from config
         const languages = config.languages || [];
 
@@ -73,13 +94,14 @@ async function handleSubtitles(args, config) {
             }
             
             if (cachedSubtitles.length > 0) {
-                rawSubtitles = cachedSubtitles;
+                // Regenerate SubSource URLs with current user's encrypted API key
+                rawSubtitles = regenerateSubsourceUrls(cachedSubtitles, config, parsed.episode);
                 cacheHit = true;
-                log('info', `[Subtitles] Cache HIT: ${cachedSubtitles.length} subtitles for ${wyzieLanguages.join(', ')}`);
+                log('info', `[Subtitles] Cache HIT: ${rawSubtitles.length} subtitles for ${wyzieLanguages.join(', ')}`);
                 
                 if (needsRefresh) {
                     log('debug', 'Cache stale, triggering background refresh');
-                    backgroundPromise = refreshCacheInBackground(parsed, wyzieLanguages);
+                    backgroundPromise = refreshCacheInBackground(parsed, wyzieLanguages, videoContext, config);
                 }
                 
                 if (statsDB) {
@@ -99,13 +121,13 @@ async function handleSubtitles(args, config) {
 
             if (USE_FAST_FIRST) {
                 // Multi-language fast-first strategy
-                const result = await fetchSubtitlesFastFirstMulti(parsed, wyzieLanguages);
+                const result = await fetchSubtitlesFastFirstMulti(parsed, wyzieLanguages, videoContext, config);
                 rawSubtitles = result.subtitles;
                 backgroundPromise = result.backgroundPromise;
                 log('info', `[Subtitles] Fast-first multi-lang: got ${rawSubtitles.length} subtitles`);
             } else {
                 // Legacy: fetch all at once
-                rawSubtitles = await fetchSubtitles(parsed);
+                rawSubtitles = await fetchSubtitles(parsed, videoContext, config);
                 log('debug', `Fetched ${rawSubtitles.length} raw subtitles from providers`);
             }
 
@@ -208,14 +230,37 @@ async function handleSubtitles(args, config) {
  * Calls ALL enabled providers in parallel, combining results
  * @param {Object} parsed - Parsed Stremio ID
  * @param {Array<string>} languages - Array of language codes (2-letter)
+ * @param {Object} videoContext - Video file context from Stremio (optional)
+ * @param {string|null} videoContext.videoHash - OpenSubtitles-style hash
+ * @param {number|null} videoContext.videoSize - File size in bytes
+ * @param {string|null} videoContext.filename - Video filename
+ * @param {Object} config - User configuration (optional)
+ * @param {string|null} config.subsourceApiKey - SubSource API key (if configured)
  * @returns {Object} { subtitles, fromCache, backgroundPromise }
  */
-async function fetchSubtitlesFastFirstMulti(parsed, languages) {
+async function fetchSubtitlesFastFirstMulti(parsed, languages, videoContext = {}, config = {}) {
+    // Generate encrypted API key for SubSource download URLs
+    let encryptedApiKey = null;
+    if (config.subsourceApiKey && encryptConfig) {
+        try {
+            encryptedApiKey = encryptConfig({ apiKey: config.subsourceApiKey });
+        } catch (err) {
+            log('warn', `[Subtitles] Failed to encrypt API key for SubSource: ${err.message}`);
+        }
+    }
+    
     const query = {
         imdbId: parsed.imdbId,
         season: parsed.season,
         episode: parsed.episode,
-        language: languages[0] // Primary language for providers that need it
+        language: languages[0], // Primary language for providers that need it
+        videoHash: videoContext.videoHash, // Include video context for providers that support it
+        videoSize: videoContext.videoSize,
+        filename: videoContext.filename,
+        // SubSource API key (if user has configured it)
+        apiKey: config.subsourceApiKey || null,
+        // Encrypted API key for download URLs
+        encryptedApiKey: encryptedApiKey
     };
 
     const enabledProviders = providerManager.getEnabled();
@@ -303,13 +348,32 @@ async function fetchSubtitlesFastFirstMulti(parsed, languages) {
  * Fetch subtitles from all registered providers (legacy method)
  * Uses the provider abstraction layer for flexibility
  * @param {Object} parsed - Parsed Stremio ID
+ * @param {Object} videoContext - Video file context from Stremio (optional)
+ * @param {Object} config - User configuration (optional)
  * @returns {Array} Normalized subtitle objects from all providers
  */
-async function fetchSubtitles(parsed) {
+async function fetchSubtitles(parsed, videoContext = {}, config = {}) {
+    // Generate encrypted API key for SubSource download URLs
+    let encryptedApiKey = null;
+    if (config.subsourceApiKey && encryptConfig) {
+        try {
+            encryptedApiKey = encryptConfig({ apiKey: config.subsourceApiKey });
+        } catch (err) {
+            log('warn', `[Subtitles] Failed to encrypt API key for SubSource: ${err.message}`);
+        }
+    }
+    
     const query = {
         imdbId: parsed.imdbId,
         season: parsed.season,
-        episode: parsed.episode
+        episode: parsed.episode,
+        videoHash: videoContext.videoHash, // Include video context for providers that support it
+        videoSize: videoContext.videoSize,
+        filename: videoContext.filename,
+        // SubSource API key (if user has configured it)
+        apiKey: config.subsourceApiKey || null,
+        // Encrypted API key for download URLs
+        encryptedApiKey: encryptedApiKey
     };
 
     log('debug', `Fetching from ${providerManager.getEnabled().length} provider(s)`);
@@ -538,13 +602,15 @@ function formatForStremio(subtitles) {
  * Refresh cache in background for multiple languages (fire-and-forget)
  * @param {Object} parsed - Parsed Stremio ID
  * @param {Array<string>} languages - Language codes (2-letter)
+ * @param {Object} videoContext - Video file context (optional)
+ * @param {Object} config - User configuration (optional)
  * @returns {Promise} Background fetch promise
  */
-async function refreshCacheInBackground(parsed, languages) {
+async function refreshCacheInBackground(parsed, languages, videoContext = {}, config = {}) {
     try {
         log('debug', `Background refresh starting for ${parsed.imdbId}`);
         
-        const result = await fetchSubtitlesFastFirstMulti(parsed, languages);
+        const result = await fetchSubtitlesFastFirstMulti(parsed, languages, videoContext, config);
         
         if (result.subtitles.length > 0 && subtitleCache) {
             // Cache ALL languages for future users
@@ -583,6 +649,58 @@ function cacheSubtitlesByLanguage(parsed, subtitles) {
     }
     
     log('info', `[Cache] Stored ${subtitles.length} subtitles across ${languages.length} languages for ${parsed.imdbId}`);
+}
+
+/**
+ * Regenerate SubSource URLs with current user's encrypted API key
+ * Cached SubSource subtitles may have been stored without API key (from other users)
+ * This ensures each user's requests have their own encrypted API key in download URLs
+ * @param {Array} subtitles - Cached subtitle objects
+ * @param {Object} config - User configuration with subsourceApiKey
+ * @param {number|null} episode - Episode number for TV series
+ * @returns {Array} Subtitles with regenerated SubSource URLs
+ */
+function regenerateSubsourceUrls(subtitles, config, episode = null) {
+    if (!config.subsourceApiKey || !encryptConfig) {
+        return subtitles; // No API key or encryption not available
+    }
+    
+    let encryptedApiKey = null;
+    try {
+        encryptedApiKey = encryptConfig({ apiKey: config.subsourceApiKey });
+    } catch (err) {
+        log('warn', `[Subtitles] Failed to encrypt API key for cache regeneration: ${err.message}`);
+        return subtitles;
+    }
+    
+    const baseUrl = process.env.SUBSENSE_BASE_URL || `http://127.0.0.1:${process.env.PORT || 3100}`;
+    
+    return subtitles.map(sub => {
+        // Only modify SubSource subtitles
+        if (sub.source !== 'subsource' && sub.provider !== 'subsource') {
+            return sub;
+        }
+        
+        // Extract subtitle ID from existing URL
+        const match = sub.url?.match(/\/api\/subsource\/proxy\/(\d+)/);
+        if (!match) {
+            return sub;
+        }
+        
+        const subtitleId = match[1];
+        
+        // Build new URL with encrypted API key
+        const params = new URLSearchParams();
+        params.set('key', encryptedApiKey);
+        if (episode) {
+            params.set('episode', episode.toString());
+        }
+        
+        return {
+            ...sub,
+            url: `${baseUrl}/api/subsource/proxy/${subtitleId}?${params.toString()}`
+        };
+    });
 }
 
 module.exports = {

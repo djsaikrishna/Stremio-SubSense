@@ -86,13 +86,19 @@ function parseConfig(config) {
 
     log('debug', `Config parsed: languages=[${validLanguages.join(', ')}], maxSubtitles=${maxSubtitles || 'unlimited'}`);
 
-    return {
+    const result = {
         languages: validLanguages,
         maxSubtitles: maxSubtitles,
         // For backward compatibility, expose first language as primaryLang
         primaryLang: validLanguages[0],
         secondaryLang: validLanguages[1] || 'none'
     };
+    
+    if (config.subsourceApiKey) {
+        result.subsourceApiKey = config.subsourceApiKey;
+    }
+    
+    return result;
 }
 
 /**

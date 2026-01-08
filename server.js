@@ -32,6 +32,93 @@ const PUBLIC_BASE_URL = process.env.SUBSENSE_BASE_URL || LOCAL_BASE_URL;
 // Serve static files from public folder
 app.use(express.static(path.join(__dirname, 'public')));
 
+// Parse JSON body for POST requests
+app.use(express.json());
+
+// Import crypto utilities for config encryption (graceful failure if not configured)
+let encryptConfig, decryptConfig, isEncryptionConfigured;
+try {
+    const crypto = require('./src/utils/crypto');
+    encryptConfig = crypto.encryptConfig;
+    decryptConfig = crypto.decryptConfig;
+    isEncryptionConfigured = crypto.isEncryptionConfigured;
+} catch (e) {
+    log('warn', '[Crypto] Module not available - encryption features disabled');
+    encryptConfig = () => { throw new Error('Encryption not configured'); };
+    decryptConfig = () => { throw new Error('Encryption not configured'); };
+    isEncryptionConfigured = () => false;
+}
+
+// Import SubSource provider for API key validation
+let SubSourceProvider;
+try {
+    SubSourceProvider = require('./src/providers/SubSourceProvider');
+} catch (e) {
+    log('warn', '[SubSource] Provider not available');
+    SubSourceProvider = null;
+}
+
+// =====================================================
+// Config Encryption API
+// =====================================================
+
+/**
+ * Encrypt config for manifest URL
+ * POST /api/config/encrypt
+ * Body: { config: { languages: [...], providers: { subsource: 'api_key' } } }
+ * Returns: { encrypted: 'base64url_string' }
+ */
+app.post('/api/config/encrypt', (req, res) => {
+    try {
+        if (!isEncryptionConfigured()) {
+            log('error', '[Config] Encryption key not configured');
+            return res.status(500).json({ error: 'Encryption not configured' });
+        }
+        
+        const { config } = req.body;
+        if (!config) {
+            return res.status(400).json({ error: 'Config object required' });
+        }
+        
+        const encrypted = encryptConfig(config);
+        log('debug', `[Config] Encrypted config (${encrypted.length} chars)`);
+        
+        res.json({ encrypted });
+    } catch (error) {
+        log('error', `[Config] Encryption failed: ${error.message}`);
+        res.status(500).json({ error: 'Encryption failed' });
+    }
+});
+
+/**
+ * Validate SubSource API key
+ * POST /api/subsource/validate
+ * Body: { apiKey: 'sk_...' }
+ * Returns: { valid: true, remaining: 59 } or { valid: false, error: '...' }
+ */
+app.post('/api/subsource/validate', async (req, res) => {
+    try {
+        if (!SubSourceProvider) {
+            return res.status(500).json({ valid: false, error: 'SubSource provider not available' });
+        }
+        
+        const { apiKey } = req.body;
+        
+        if (!apiKey) {
+            return res.status(400).json({ valid: false, error: 'API key required' });
+        }
+        
+        // Use SubSourceProvider's validation method
+        const provider = new SubSourceProvider();
+        const result = await provider.validateApiKey(apiKey);
+        
+        res.json(result);
+    } catch (error) {
+        log('error', `[SubSource Validate] Error: ${error.message}`);
+        res.status(500).json({ valid: false, error: error.message });
+    }
+});
+
 // Configuration page route
 app.get('/configure', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
@@ -412,17 +499,35 @@ app.get('/:config/manifest.json', (req, res) => {
     }
     
     let config = {};
+    let isEncrypted = false;
+    
+    // First, try to parse as URL-encoded JSON (non-encrypted config)
     try {
         config = JSON.parse(decodeURIComponent(configString));
-        log('debug', `Parsed config: ${JSON.stringify(config)}`);
-    } catch (e) {
-        log('warn', `Failed to parse config from URL: ${configString}`);
+        log('debug', `Parsed plaintext config: ${JSON.stringify(config)}`);
+    } catch (jsonErr) {
+        // If JSON parse fails, try to decrypt (encrypted config)
+        if (decryptConfig && isEncryptionConfigured && isEncryptionConfigured()) {
+            try {
+                config = decryptConfig(configString);
+                isEncrypted = true;
+                // Log without exposing sensitive keys
+                const safeLog = { ...config };
+                if (safeLog.subsourceApiKey) safeLog.subsourceApiKey = '[REDACTED]';
+                log('debug', `Decrypted config: ${JSON.stringify(safeLog)}`);
+            } catch (decryptErr) {
+                log('warn', `Failed to parse/decrypt config from URL: ${configString.substring(0, 20)}...`);
+            }
+        } else {
+            log('warn', `Failed to parse config from URL (no encryption available): ${configString.substring(0, 20)}...`);
+        }
     }
     
     // Store userId in config for later use in subtitle handler
     if (userId) {
         config.userId = userId;
     }
+    config._isEncrypted = isEncrypted;
     
     // Generate manifest with dynamic description
     const manifest = generateManifest(config);
@@ -854,6 +959,243 @@ app.get('/api/yify/proxy/:subtitleId', async (req, res) => {
 });
 
 // =====================================================
+// SubSource Proxy Endpoint
+// =====================================================
+
+/**
+ * SubSource subtitle proxy - downloads ZIP from SubSource API and extracts subtitle
+ * URL format: /api/subsource/proxy/:subtitleId?key=xxx&episode=1&filename=xxx
+ * 
+ * This endpoint:
+ * 1. Decrypts the API key from query parameter
+ * 2. Downloads ZIP from SubSource API
+ * 3. Extracts correct subtitle file (matching episode for TV series)
+ * 4. Converts ASS/SSA to VTT if needed
+ * 5. Returns subtitle content directly
+ */
+const subsourceSubtitleCache = new Map();
+const SUBSOURCE_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours
+
+function cleanSubsourceCache() {
+    const now = Date.now();
+    for (const [key, value] of subsourceSubtitleCache.entries()) {
+        if (now - value.timestamp > SUBSOURCE_CACHE_TTL) {
+            subsourceSubtitleCache.delete(key);
+        }
+    }
+}
+// Clean cache every hour
+setInterval(cleanSubsourceCache, 60 * 60 * 1000);
+
+app.get('/api/subsource/proxy/:subtitleId', async (req, res) => {
+    const { subtitleId } = req.params;
+    const { key, episode, filename } = req.query;
+    
+    const cacheKey = `${subtitleId}:${episode || 'all'}`;
+    
+    log('debug', `[SubSource Proxy] Request: subtitleId=${subtitleId}, episode=${episode}`);
+    
+    try {
+        // Check cache first
+        const cached = subsourceSubtitleCache.get(cacheKey);
+        if (cached && Date.now() - cached.timestamp < SUBSOURCE_CACHE_TTL) {
+            log('debug', `[SubSource Proxy] Cache HIT for ${cacheKey}`);
+            const contentType = cached.outputFormat === 'vtt' ? 'text/vtt; charset=utf-8' : 'text/plain; charset=utf-8';
+            res.setHeader('Content-Type', contentType);
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.setHeader('X-SubSource-Cache', 'hit');
+            res.setHeader('X-SubSource-Output-Format', cached.outputFormat || 'srt');
+            return res.send(cached.content);
+        }
+        
+        // Decrypt API key
+        if (!key) {
+            log('warn', '[SubSource Proxy] No API key provided');
+            return res.status(401).send('SubSource API key required');
+        }
+        
+        if (!decryptConfig) {
+            log('error', '[SubSource Proxy] Crypto module not available');
+            return res.status(500).send('Encryption not configured');
+        }
+        
+        let apiKey;
+        try {
+            // The key parameter contains encrypted API key
+            const config = decryptConfig(key);
+            apiKey = config.apiKey || config;
+        } catch (decryptError) {
+            log('error', `[SubSource Proxy] Decryption failed: ${decryptError.message}`);
+            return res.status(401).send('Invalid API key');
+        }
+        
+        // Download ZIP from SubSource API
+        const downloadUrl = `https://api.subsource.net/api/v1/subtitles/${subtitleId}/download`;
+        log('debug', `[SubSource Proxy] Downloading: ${downloadUrl}`);
+        
+        const zipResponse = await fetch(downloadUrl, {
+            headers: {
+                'X-API-Key': apiKey,
+                'User-Agent': 'SubSense-Stremio/1.0',
+                'Accept': 'application/zip'
+            }
+        });
+        
+        if (zipResponse.status === 401) {
+            log('warn', '[SubSource Proxy] Invalid API key (401)');
+            return res.status(401).send('Invalid SubSource API key');
+        }
+        
+        if (zipResponse.status === 429) {
+            log('warn', '[SubSource Proxy] Rate limited (429)');
+            return res.status(429).send('SubSource rate limit exceeded');
+        }
+        
+        if (!zipResponse.ok) {
+            log('error', `[SubSource Proxy] Download failed: ${zipResponse.status}`);
+            return res.status(zipResponse.status).send('Failed to download subtitle from SubSource');
+        }
+        
+        const buffer = Buffer.from(await zipResponse.arrayBuffer());
+        
+        // Check if it's a ZIP file
+        const isZip = buffer.length >= 2 && buffer[0] === 0x50 && buffer[1] === 0x4b;
+        
+        if (!isZip) {
+            log('error', '[SubSource Proxy] Response is not a ZIP file');
+            return res.status(500).send('Invalid response from SubSource');
+        }
+        
+        if (!AdmZip) {
+            log('error', '[SubSource Proxy] adm-zip not installed');
+            return res.status(500).send('ZIP extraction not available');
+        }
+        
+        const zip = new AdmZip(buffer);
+        const entries = zip.getEntries();
+        
+        // Filter to subtitle files only
+        const SUBTITLE_EXTENSIONS = ['.srt', '.vtt', '.ass', '.ssa', '.sub', '.smi'];
+        const subtitleEntries = entries.filter(entry => {
+            const name = entry.entryName.toLowerCase();
+            return !name.startsWith('._') && 
+                   !name.startsWith('__MACOSX') &&
+                   SUBTITLE_EXTENSIONS.some(ext => name.endsWith(ext));
+        });
+        
+        if (subtitleEntries.length === 0) {
+            log('error', '[SubSource Proxy] No subtitle files found in ZIP');
+            return res.status(404).send('No subtitle files found in archive');
+        }
+        
+        // Select the correct file
+        let selectedEntry = null;
+        let entryFormat = 'srt';
+        
+        if (subtitleEntries.length === 1) {
+            // Single file - use it directly
+            selectedEntry = subtitleEntries[0];
+        } else if (episode) {
+            // Multiple files - try to match episode
+            const epNum = episode.toString().padStart(2, '0');
+            // Same patterns as SubSourceProvider._filterByEpisode for consistency
+            const patterns = [
+                new RegExp(`[sS]\\d+[eE]${epNum}\\b`, 'i'),  // S01E07 (most reliable)
+                new RegExp(`[eE]${epNum}\\b`, 'i'),          // E07
+                new RegExp(`x${epNum}\\b`, 'i'),             // 1x07
+                new RegExp(`\\.${epNum}\\.`, 'i'),           // .07.
+                new RegExp(`-${epNum}-`, 'i'),               // -07-
+                new RegExp(` ${epNum} `),                    // " 07 " (space-padded)
+                new RegExp(`\\b${epNum}\\b`),                // bare number (less reliable, try last)
+            ];
+            
+            for (const entry of subtitleEntries) {
+                const name = entry.entryName;
+                for (const pattern of patterns) {
+                    if (pattern.test(name)) {
+                        selectedEntry = entry;
+                        break;
+                    }
+                }
+                if (selectedEntry) break;
+            }
+            
+            // Fallback to filename matching if provided
+            if (!selectedEntry && filename) {
+                const filenameLower = filename.toLowerCase();
+                for (const entry of subtitleEntries) {
+                    const entryLower = entry.entryName.toLowerCase();
+                    // Check if release group or other identifiers match
+                    const filenameParts = filenameLower.split(/[\.\-\_\s]+/);
+                    const entryParts = entryLower.split(/[\.\-\_\s]+/);
+                    const matches = filenameParts.filter(p => entryParts.includes(p));
+                    if (matches.length >= 3) {
+                        selectedEntry = entry;
+                        break;
+                    }
+                }
+            }
+        }
+        
+        // Fallback: prefer SRT, then first file
+        if (!selectedEntry) {
+            selectedEntry = subtitleEntries.find(e => e.entryName.toLowerCase().endsWith('.srt')) ||
+                           subtitleEntries[0];
+        }
+        
+        // Determine format from extension
+        const selectedName = selectedEntry.entryName.toLowerCase();
+        if (selectedName.endsWith('.ass') || selectedName.endsWith('.ssa')) {
+            entryFormat = 'ass';
+        } else if (selectedName.endsWith('.vtt')) {
+            entryFormat = 'vtt';
+        } else if (selectedName.endsWith('.sub') || selectedName.endsWith('.smi')) {
+            entryFormat = 'sub';
+        }
+        
+        let content = bufferToUtf8(selectedEntry.getData());
+        log('debug', `[SubSource Proxy] Extracted: ${selectedEntry.entryName} (format: ${entryFormat}, ${content.length} chars)`);
+        
+        let outputFormat = entryFormat;
+        
+        // Convert ASS/SSA to VTT if needed
+        if (entryFormat === 'ass') {
+            const result = convertSubtitle(content);
+            content = result.content;
+            outputFormat = result.format;
+            log('info', `[SubSource Proxy] Converted ASS to ${result.format.toUpperCase()} (${result.captionCount} captions)`);
+        }
+        
+        // Cache the result
+        subsourceSubtitleCache.set(cacheKey, {
+            content: content,
+            originalFormat: entryFormat,
+            outputFormat: outputFormat,
+            selectedFile: selectedEntry.entryName,
+            timestamp: Date.now()
+        });
+        
+        // Return the subtitle content
+        const contentType = outputFormat === 'vtt' ? 'text/vtt; charset=utf-8' : 'text/plain; charset=utf-8';
+        res.setHeader('Content-Type', contentType);
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('X-SubSource-Cache', 'miss');
+        res.setHeader('X-SubSource-Extracted', 'yes');
+        res.setHeader('X-SubSource-Original-Format', entryFormat);
+        res.setHeader('X-SubSource-Output-Format', outputFormat);
+        res.setHeader('X-SubSource-Selected-File', selectedEntry.entryName);
+        if (entryFormat === 'ass') {
+            res.setHeader('X-SubSource-Converted', 'yes');
+        }
+        res.send(content);
+        
+    } catch (error) {
+        log('error', `[SubSource Proxy] Error: ${error.message}`);
+        res.status(500).send(`SubSource proxy error: ${error.message}`);
+    }
+});
+
+// =====================================================
 // TVsubtitles Proxy Endpoint
 // =====================================================
 
@@ -1188,13 +1530,28 @@ app.get('/:config/subtitles/:type/:id/:extra?.json', async (req, res) => {
             log('debug', `UserID extracted: ${userId}`);
         }
         
-        // Parse JSON config from URL
+        // Parse JSON config from URL (try plaintext first, then encrypted)
         let config = {};
+        let isEncrypted = false;
+        
         try {
             config = JSON.parse(decodeURIComponent(configString));
-        } catch (e) {
-            log('warn', `Failed to parse config: ${configString}`);
-            return res.status(400).json({ subtitles: [], error: 'Invalid config format' });
+            log('debug', `Parsed plaintext config for subtitles`);
+        } catch (jsonErr) {
+            // If JSON parse fails, try to decrypt (encrypted config)
+            if (decryptConfig && isEncryptionConfigured && isEncryptionConfigured()) {
+                try {
+                    config = decryptConfig(configString);
+                    isEncrypted = true;
+                    log('debug', `Decrypted config for subtitles (hasSubsourceKey=${!!config.subsourceApiKey})`);
+                } catch (decryptErr) {
+                    log('warn', `Failed to parse/decrypt config for subtitles: ${configString.substring(0, 20)}...`);
+                    return res.status(400).json({ subtitles: [], error: 'Invalid config format' });
+                }
+            } else {
+                log('warn', `Failed to parse config for subtitles (no encryption available): ${configString.substring(0, 20)}...`);
+                return res.status(400).json({ subtitles: [], error: 'Invalid config format' });
+            }
         }
         
         // Store userId in config for tracking

@@ -18,6 +18,8 @@ let LANGUAGES = [
 let selectedLanguages = [];
 let selectedMaxSubtitles = DEFAULT_MAX_SUBTITLES;
 let highlightIndex = -1;
+let subsourceApiKey = '';
+let subsourceApiKeyValid = false;
 
 const container = document.getElementById('multiselectContainer');
 const inputWrapper = document.getElementById('inputWrapper');
@@ -40,6 +42,17 @@ const maxSubtitlesOptions = document.getElementById('maxSubtitlesOptions');
 const maxSubtitlesText = document.getElementById('maxSubtitlesText');
 const maxSubtitlesSelect = document.getElementById('maxSubtitlesSelect');
 
+// SubSource API Key elements
+const subsourceApiKeyInput = document.getElementById('subsourceApiKey');
+const toggleApiKeyVisibility = document.getElementById('toggleApiKeyVisibility');
+const testSubsourceKeyBtn = document.getElementById('testSubsourceKey');
+const subsourceApiStatus = document.getElementById('subsourceApiStatus');
+const subsourceSourceItem = document.getElementById('subsourceSourceItem');
+
+// Optional Sources expandable section
+const optionalSourcesSection = document.getElementById('optionalSourcesSection');
+const optionalSourcesToggle = document.getElementById('optionalSourcesToggle');
+
 async function fetchLanguages() {
     try {
         const response = await fetch('/api/languages');
@@ -60,6 +73,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     fetchVersion();
     restoreSavedLanguages();
     restoreSavedMaxSubtitles();
+    initSubsourceApiKey();
     renderOptions();
     setupEventListeners();
     updateInstallButtonState();
@@ -432,6 +446,15 @@ function getManifestUrl() {
     return `${protocol}://${host}/${userId}-${configString}/manifest.json`;
 }
 
+async function getManifestUrlWithApiKeys() {
+    const userId = generateUserId();
+    const configString = await getEncryptedConfig();
+    const host = window.location.host;
+    const protocol = window.location.protocol === 'https:' ? 'https' : 'http';
+    
+    return `${protocol}://${host}/${userId}-${configString}/manifest.json`;
+}
+
 function getStremioUrl() {
     const config = {
         languages: selectedLanguages
@@ -448,7 +471,15 @@ function getStremioUrl() {
     return `stremio://${host}/${userId}-${configString}/manifest.json`;
 }
 
-function installAddon() {
+async function getStremioUrlWithApiKeys() {
+    const userId = generateUserId();
+    const configString = await getEncryptedConfig();
+    const host = window.location.host;
+    
+    return `stremio://${host}/${userId}-${configString}/manifest.json`;
+}
+
+async function installAddon() {
     if (selectedLanguages.length === 0) {
         showToast('Please select at least one language', 'error');
         return;
@@ -464,8 +495,13 @@ function installAddon() {
     
     installDropdownToggle.disabled = true;
     
+    // Use async version if API keys are configured
+    const stremioUrl = subsourceApiKeyValid ? 
+        await getStremioUrlWithApiKeys() : 
+        getStremioUrl();
+    
     setTimeout(() => {
-        window.location.href = getStremioUrl();
+        window.location.href = stremioUrl;
         
         setTimeout(() => {
             installBtn.innerHTML = originalContent;
@@ -482,7 +518,10 @@ async function copyManifestUrl() {
         return;
     }
     
-    const url = getManifestUrl();
+    // Use async version if API keys are configured
+    const url = subsourceApiKeyValid ? 
+        await getManifestUrlWithApiKeys() : 
+        getManifestUrl();
     
     try {
         await navigator.clipboard.writeText(url);
@@ -508,6 +547,151 @@ function showToast(message, type = 'success') {
     setTimeout(() => {
         toast.classList.remove('show');
     }, 3000);
+}
+
+// ===== SubSource API Key Functions =====
+
+const EYE_OPEN_PATH = 'M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z';
+const EYE_CLOSED_PATH = 'M12 7c2.76 0 5 2.24 5 5 0 .65-.13 1.26-.36 1.83l2.92 2.92c1.51-1.26 2.7-2.89 3.43-4.75-1.73-4.39-6-7.5-11-7.5-1.4 0-2.74.25-3.98.7l2.16 2.16C10.74 7.13 11.35 7 12 7zM2 4.27l2.28 2.28.46.46C3.08 8.3 1.78 10.02 1 12c1.73 4.39 6 7.5 11 7.5 1.55 0 3.03-.3 4.38-.84l.42.42L19.73 22 21 20.73 3.27 3 2 4.27zM7.53 9.8l1.55 1.55c-.05.21-.08.43-.08.65 0 1.66 1.34 3 3 3 .22 0 .44-.03.65-.08l1.55 1.55c-.67.33-1.41.53-2.2.53-2.76 0-5-2.24-5-5 0-.79.2-1.53.53-2.2zm4.31-.78l3.15 3.15.02-.16c0-1.66-1.34-3-3-3l-.17.01z';
+
+function initSubsourceApiKey() {
+    if (optionalSourcesToggle && optionalSourcesSection) {
+        optionalSourcesToggle.addEventListener('click', () => {
+            optionalSourcesSection.classList.toggle('expanded');
+        });
+    }
+    
+    if (toggleApiKeyVisibility) {
+        toggleApiKeyVisibility.addEventListener('click', () => {
+            const isPassword = subsourceApiKeyInput.type === 'password';
+            subsourceApiKeyInput.type = isPassword ? 'text' : 'password';
+            const eyeIcon = document.getElementById('eyeIcon');
+            if (eyeIcon) {
+                const pathEl = eyeIcon.querySelector('path');
+                if (pathEl) {
+                    pathEl.setAttribute('d', isPassword ? EYE_CLOSED_PATH : EYE_OPEN_PATH);
+                }
+            }
+        });
+    }
+    
+    if (testSubsourceKeyBtn) {
+        testSubsourceKeyBtn.addEventListener('click', () => {
+            const key = subsourceApiKeyInput.value.trim();
+            if (key) {
+                validateSubsourceApiKey(key, false);
+            } else {
+                updateSubsourceStatus('unconfigured', 'Enter an API key to enable SubSource');
+            }
+        });
+    }
+    
+    if (subsourceApiKeyInput) {
+        subsourceApiKeyInput.addEventListener('input', () => {
+            const key = subsourceApiKeyInput.value.trim();
+            if (!key) {
+                subsourceApiKey = '';
+                subsourceApiKeyValid = false;
+                updateSubsourceStatus('unconfigured', 'Enter an API key to enable SubSource');
+                updateSubsourceSourceVisibility();
+            } else if (!subsourceApiKeyValid || key !== subsourceApiKey) {
+                subsourceApiKeyValid = false;
+                updateSubsourceStatus('unconfigured', 'Click Test to validate your API key');
+                updateSubsourceSourceVisibility();
+            }
+        });
+    }
+}
+
+async function validateSubsourceApiKey(apiKey, silent = false) {
+    if (!silent) {
+        updateSubsourceStatus('testing', 'Validating API key...');
+        if (testSubsourceKeyBtn) testSubsourceKeyBtn.disabled = true;
+    }
+    
+    try {
+        const response = await fetch('/api/subsource/validate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ apiKey })
+        });
+        
+        const result = await response.json();
+        
+        if (result.valid) {
+            subsourceApiKey = apiKey;
+            subsourceApiKeyValid = true;
+            updateSubsourceStatus('valid', 'API key is valid ✓');
+            if (!silent) showToast('SubSource API key validated!');
+        } else {
+            subsourceApiKey = '';
+            subsourceApiKeyValid = false;
+            updateSubsourceStatus('invalid', result.error || 'Invalid API key');
+            if (!silent) showToast('Invalid API key', 'error');
+        }
+    } catch (error) {
+        console.error('Failed to validate SubSource API key:', error);
+        updateSubsourceStatus('invalid', 'Failed to validate - check connection');
+        if (!silent) showToast('Failed to validate API key', 'error');
+    } finally {
+        if (testSubsourceKeyBtn) testSubsourceKeyBtn.disabled = false;
+        updateSubsourceSourceVisibility();
+    }
+}
+
+function updateSubsourceStatus(status, message) {
+    if (!subsourceApiStatus) return;
+    
+    subsourceApiStatus.className = `api-status ${status}`;
+    const statusText = subsourceApiStatus.querySelector('.status-text');
+    if (statusText) {
+        statusText.textContent = message;
+    }
+}
+
+function updateSubsourceSourceVisibility() {
+    if (subsourceSourceItem) {
+        subsourceSourceItem.style.display = subsourceApiKeyValid ? 'flex' : 'none';
+    }
+}
+
+async function getEncryptedConfig() {
+    const config = {
+        languages: selectedLanguages
+    };
+    
+    if (selectedMaxSubtitles > 0) {
+        config.maxSubtitles = selectedMaxSubtitles;
+    }
+    
+    if (subsourceApiKey && subsourceApiKeyValid) {
+        config.subsourceApiKey = subsourceApiKey;
+    }
+    
+    if (config.subsourceApiKey) {
+        try {
+            const response = await fetch('/api/config/encrypt', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ config })
+            });
+            
+            if (response.ok) {
+                const result = await response.json();
+                return result.encrypted;
+            }
+        } catch (error) {
+            console.error('Failed to encrypt config:', error);
+        }
+    }
+    
+    const safeConfig = {
+        languages: selectedLanguages
+    };
+    if (selectedMaxSubtitles > 0) {
+        safeConfig.maxSubtitles = selectedMaxSubtitles;
+    }
+    return encodeURIComponent(JSON.stringify(safeConfig));
 }
 
 window.removeLanguage = removeLanguage;
