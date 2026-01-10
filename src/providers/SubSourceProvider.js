@@ -291,12 +291,17 @@ class SubSourceProvider extends BaseProvider {
         if (query.episode) {
             params.set('episode', query.episode.toString());
         }
-        if (query.filename) {
-            params.set('filename', query.filename);
-        }
+       
+        const sanitizedRelease = releaseInfo
+            ? releaseInfo
+                .replace(/[^a-zA-Z0-9._-]/g, '_')  // Replace special chars with underscore
+                .replace(/_+/g, '_')               // Collapse multiple underscores
+                .replace(/^_|_$/g, '')             // Trim leading/trailing underscores
+                .substring(0, 100)                 // Limit length
+            : 'subtitle';
         
         const queryStr = params.toString();
-        const downloadUrl = `${this.baseUrl}/api/subsource/proxy/${sub.subtitleId}${queryStr ? '?' + queryStr : ''}`;
+        const downloadUrl = `${this.baseUrl}/api/subsource/proxy/${sub.subtitleId}/${encodeURIComponent(sanitizedRelease)}${queryStr ? '?' + queryStr : ''}`;
         
         // Use centralized language functions
         const lang = getBySubsourceCode(sub.language);

@@ -479,7 +479,6 @@ async function fetchSubtitlesFastFirstMulti(parsed, languages, videoContext = {}
                         }
                     } else {
                         subtitleCache.set(parsed.imdbId, parsed.season, parsed.episode, lang, subs);
-                        log('debug', `[FastFirst] Wyzie background cached: ${subs.length} ${lang} subs`);
                     }
                 }
             }

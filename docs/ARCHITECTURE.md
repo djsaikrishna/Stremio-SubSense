@@ -424,6 +424,27 @@ Uses wyzie-lib to aggregate from multiple sources:
 - Uses Cinemeta for title lookup
 - Parses HTML pages for subtitle links
 
+**SubSourceProvider** (`SubSourceProvider.js`):
+- SubSource.net API integration
+- Requires user-provided API key (encrypted)
+- Supports both movies and TV series
+- Returns ZIP archives containing subtitle files
+
+**SubSource Episode Filtering:**
+SubSource API returns ALL subtitles for a movie/show without episode pre-filtering. SubSense implements two layers of filtering:
+
+1. **Pre-filtering at search time** (`_shouldIncludeSubtitle()`):
+   - Excludes clear episode mismatches based on `releaseInfo` patterns
+   - Conservative approach: only excludes when SURE it's wrong
+   - Patterns detected: `S01E13`, `E13`, `Ep13`, episode ranges like `S01E01-E12`
+   - Supports 4-digit episodes for anime (e.g., One Piece E1050)
+   - Season packs without episode numbers pass through (proxy handles)
+
+2. **Proxy validation at download time** (server.js):
+   - For single-file ZIPs: validates episode pattern in filename
+   - Returns 404 if file episode doesn't match requested episode
+   - Multi-file ZIPs: selects correct file using episode matching logic
+
 ### 7.2 Fast-First Strategy with Timeout
 
 The Fast-First strategy ensures Stremio receives a response within 4 seconds to avoid being marked as "failed":
@@ -621,11 +642,61 @@ window.location.href = url;
 
 ### 11.2 Proxy Routes
 
+#### 11.2.1 Format Conversion Proxies
+
+These proxies convert subtitle formats (ASS → VTT/SRT) and serve them to Stremio:
+
 | Route | Method | Purpose |
 |-------|--------|---------|
 | `/api/subtitle/vtt/*` | GET | Convert ASS to VTT (preserves styling) |
 | `/api/subtitle/srt/*` | GET | Convert ASS to SRT (plain text) |
 | `/api/subtitle/ass/*` | GET | Passthrough ASS (no conversion) |
+
+The `*` path is the original subtitle URL (URL-encoded).
+
+#### 11.2.2 Provider-Specific Proxies
+
+Some providers require server-side processing (ZIP extraction, auth, scraping):
+
+| Provider | Route | Parameters | Purpose |
+|----------|-------|------------|---------|
+| **SubSource** | `/api/subsource/proxy/:subtitleId` | `key` (required), `episode`, `season` | Downloads ZIP, extracts correct episode file |
+| **BetaSeries** | `/api/betaseries/proxy/:subtitleId` | `lang` (optional) | Fetches subtitle from BetaSeries CDN |
+| **YIFY** | `/api/yify/proxy/:subtitleId` | None | Scrapes yts-subs.com for download link |
+| **TVsubtitles** | `/api/tvsubtitles/proxy/:subtitleId` | `episodeUrl`, `lang` | Scrapes tvsubtitles.net for download |
+
+**SubSource Proxy Parameters:**
+- `key`: Encrypted user API key (required for SubSource API auth)
+- `episode`: Episode number for selecting correct file from ZIP archives
+- `season`: Season number for cache key differentiation
+- `filename`: *Unused - can be removed in future*
+
+**Why key is required for SubSource:**
+SubSource API requires authentication for the `/subtitles/{id}/download` endpoint. The key is encrypted client-side (AES-256-GCM) and passed in the URL, then decrypted server-side to authenticate with SubSource.
+
+#### 11.2.3 Subtitle URL Formats
+
+When subtitles are returned to Stremio, they use different URL formats:
+
+```
+# Direct URL (no proxy needed - wyzie sources)
+https://dl.opensubtitles.org/download/...
+
+# Format conversion proxy (ASS → VTT/SRT)
+/api/subtitle/vtt/{encoded-original-url}
+
+# Provider proxy (ZIP extraction, scraping)
+/api/subsource/proxy/2607183?key=xxx&episode=2&season=1
+/api/betaseries/proxy/12345?lang=vo
+/api/yify/proxy/movie-name-subtitle-id
+/api/tvsubtitles/proxy/12345?episodeUrl=xxx
+```
+
+**Subtitle ID format visible to users:**
+```
+subsense-{index}-{originalId}-{format}-{source}
+Example: subsense-0-2607183-vtt-subsource
+```
 
 ### 11.3 Stats API
 

@@ -995,9 +995,9 @@ function cleanSubsourceCache() {
 // Clean cache every hour
 setInterval(cleanSubsourceCache, 60 * 60 * 1000);
 
-app.get('/api/subsource/proxy/:subtitleId', async (req, res) => {
-    const { subtitleId } = req.params;
-    const { key, season, episode, filename } = req.query;
+app.get('/api/subsource/proxy/:subtitleId/:releaseName?', async (req, res) => {
+    const { subtitleId, releaseName } = req.params;
+    const { key, season, episode } = req.query;
     
     const cacheKey = `${subtitleId}:${season || 'all'}:${episode || 'all'}`;
     

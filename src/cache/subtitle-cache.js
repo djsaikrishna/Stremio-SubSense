@@ -109,7 +109,6 @@ class SubtitleCache {
             });
             
             insertMany(subtitles);
-            log('debug', `[Cache] Stored ${subtitles.length} subtitles for ${imdbId} (${language})`);
         } catch (error) {
             log('error', '[Cache] Set error:', error.message);
         }
