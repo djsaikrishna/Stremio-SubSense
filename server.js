@@ -27,7 +27,7 @@ if (process.env.ENABLE_CACHE !== 'false') {
 // Local URL for internal proxy calls (always localhost)
 const LOCAL_BASE_URL = `http://127.0.0.1:${PORT}`;
 
-// Public URL for display/manifest purposes (can be a production domain if set)
+// Public URL for external access (can be overridden via env)
 const PUBLIC_BASE_URL = process.env.SUBSENSE_BASE_URL || LOCAL_BASE_URL;
 
 // Serve static files from public folder

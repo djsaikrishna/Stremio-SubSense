@@ -43,7 +43,6 @@ function parseFilename(filename, isTv = true) {
         parseCache.set(cacheKey, parsed);
         return parsed;
     } catch (error) {
-        log('debug', `[Filename Matching] Parse error: ${error.message}`);
         return null;
     }
 }

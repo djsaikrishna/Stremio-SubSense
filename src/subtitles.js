@@ -58,9 +58,9 @@ async function handleSubtitles(args, config) {
         // Extract Stremio extra parameters (video file info)
         const stremioExtra = args.extra || {};
         const videoContext = {
-            videoHash: stremioExtra.videoHash || null,      // OpenSubtitles-style hash
-            videoSize: stremioExtra.videoSize || null,      // File size in bytes
-            filename: stremioExtra.filename || null         // User's video filename - Filename similarity ranking
+            videoHash: stremioExtra.videoHash || null,
+            videoSize: stremioExtra.videoSize || null,
+            filename: stremioExtra.filename || null
         };
         
         if (videoContext.filename) {
@@ -105,7 +105,6 @@ async function handleSubtitles(args, config) {
                 log('info', `[Subtitles] Cache HIT: ${rawSubtitles.length} subtitles for ${wyzieLanguages.join(', ')}`);
                 
                 if (needsRefresh) {
-                    log('debug', 'Cache stale, triggering background refresh');
                     backgroundPromise = refreshCacheInBackground(parsed, wyzieLanguages, videoContext, config);
                 }
                 
@@ -133,7 +132,6 @@ async function handleSubtitles(args, config) {
             } else {
                 // Legacy: fetch all at once
                 rawSubtitles = await fetchSubtitles(parsed, videoContext, config);
-                log('debug', `Fetched ${rawSubtitles.length} raw subtitles from providers`);
             }
 
             // Store in cache per language
@@ -145,7 +143,6 @@ async function handleSubtitles(args, config) {
         // Prioritize by user's selected languages (all with equal priority)
         const maxSubtitles = config.maxSubtitles || 0; // 0 means unlimited
         const { subtitles: prioritized, languageMatch } = prioritizeSubtitlesMulti(rawSubtitles, languages, maxSubtitles);
-        log('debug', `After prioritization: ${prioritized.length} subtitles`);
 
         // Sort by filename similarity if a real filename was provided
         let sortedSubtitles = prioritized;
@@ -308,8 +305,6 @@ async function fetchSubtitlesFastFirstMulti(parsed, languages, videoContext = {}
     const wyzieProvider = providerManager.get('wyzie');
     const otherProviders = enabledProviders.filter(p => p.name !== 'wyzie');
     
-    log('debug', `[FastFirst] Starting with ${enabledProviders.length} providers: ${enabledProviders.map(p => p.name).join(', ')}`);
-    
     // Build provider entries: { name, promise }
     const providers = [];
     
@@ -436,7 +431,6 @@ async function fetchSubtitlesFastFirstMulti(parsed, languages, videoContext = {}
                 for (const [lang, subs] of Object.entries(byLang)) {
                     const existingCache = subtitleCache.get(parsed.imdbId, parsed.season, parsed.episode, lang);
                     if (existingCache) {
-                        // Merge with existing cache (dedup by URL)
                         const existingUrls = new Set(existingCache.subtitles.map(s => s.url));
                         const newSubs = subs.filter(s => !existingUrls.has(s.url));
                         if (newSubs.length > 0) {
@@ -520,16 +514,12 @@ async function fetchSubtitles(parsed, videoContext = {}, config = {}) {
         imdbId: parsed.imdbId,
         season: parsed.season,
         episode: parsed.episode,
-        videoHash: videoContext.videoHash, // Include video context for providers that support it
+        videoHash: videoContext.videoHash,
         videoSize: videoContext.videoSize,
         filename: videoContext.filename,
-        // SubSource API key (if user has configured it)
         apiKey: config.subsourceApiKey || null,
-        // Encrypted API key for download URLs
         encryptedApiKey: encryptedApiKey
     };
-
-    log('debug', `Fetching from ${providerManager.getEnabled().length} provider(s)`);
 
     const results = await providerManager.searchAll(query);
     return results;
@@ -649,8 +639,6 @@ function prioritizeSubtitlesMulti(subtitles, languages, maxSubtitles = 0) {
  * @returns {Array} Stremio-formatted subtitle objects
  */
 function formatForStremio(subtitles) {
-    log('debug', `[formatForStremio] Formatting ${subtitles.length} subtitles for Stremio`);
-    
     // Get base URL for proxy
     const port = process.env.PORT || 3100;
     const proxyBaseUrl = process.env.SUBSENSE_BASE_URL || `http://127.0.0.1:${port}`;
@@ -690,11 +678,9 @@ function formatForStremio(subtitles) {
         const subIdBase = sub.id || Date.now();
         
         if (isAss && proxyBaseUrl) {
-            // === DUAL FORMAT: Return both VTT (styled) and SRT (plain fallback) ===
-            // VTT comes first as it preserves styling (bold, italic, underline)
-            // SRT is fallback for players that don't support VTT
+            // DUAL FORMAT: Return both VTT (styled) and SRT (plain fallback)
             
-            // 1. First: VTT subtitle (converted from ASS with styling preserved)
+            // 1. VTT subtitle (converted from ASS with styling preserved)
             const vttUrl = `${proxyBaseUrl}/api/subtitle/vtt/${sub.url}`;
             results.push({
                 id: `subsense-${outputIndex}-${subIdBase}-vtt-${source}`,
@@ -703,10 +689,9 @@ function formatForStremio(subtitles) {
                 label: baseLabel,
                 source: source
             });
-            log('debug', `[formatForStremio] [${outputIndex}] VTT styled: ${sub.url.substring(0, 50)}...`);
             outputIndex++;
             
-            // 2. Second: SRT subtitle (converted from ASS, no styling - fallback)
+            // 2. SRT subtitle (converted from ASS, no styling - fallback)
             const srtUrl = `${proxyBaseUrl}/api/subtitle/srt/${sub.url}`;
             results.push({
                 id: `subsense-${outputIndex}-${subIdBase}-srt-${source}`,
@@ -715,21 +700,15 @@ function formatForStremio(subtitles) {
                 label: baseLabel,
                 source: source
             });
-            log('debug', `[formatForStremio] [${outputIndex}] SRT fallback: ${sub.url.substring(0, 50)}...`);
             outputIndex++;
             
         } else {
-            // === SINGLE FORMAT: Non-ASS subtitles or no proxy available ===
-            
-            // Determine URL - use proxy for inspection if available
+            // SINGLE FORMAT: Non-ASS subtitles or no proxy available
             let url = sub.url;
-            const detectedFormat = format || 'srt'; // Default to SRT if unknown
+            const detectedFormat = format || 'srt';
             
             if (proxyBaseUrl && sub.needsConversion !== false) {
-                // Wrap in proxy for potential format inspection/conversion
-                // Use VTT endpoint to preserve styling if content turns out to be ASS
                 url = `${proxyBaseUrl}/api/subtitle/vtt/${sub.url}`;
-                log('debug', `[formatForStremio] [${outputIndex}] Proxying ${detectedFormat}: ${sub.url.substring(0, 50)}...`);
             }
             
             results.push({
@@ -761,14 +740,10 @@ function formatForStremio(subtitles) {
  */
 async function refreshCacheInBackground(parsed, languages, videoContext = {}, config = {}) {
     try {
-        log('debug', `Background refresh starting for ${parsed.imdbId}`);
-        
         const result = await fetchSubtitlesFastFirstMulti(parsed, languages, videoContext, config);
         
         if (result.subtitles.length > 0 && subtitleCache) {
-            // Cache ALL languages for future users
             cacheSubtitlesByLanguage(parsed, result.subtitles);
-            log('debug', `Background refresh complete: ${result.subtitles.length} total subtitles`);
         }
         
         return result.subtitles;

@@ -1,8 +1,7 @@
 /**
  * BetaSeriesProvider - Subtitle provider using BetaSeries API
- * 
- * BetaSeries is a French TV/Movie tracking service with subtitle support.
- * It aggregates subtitles from multiple sources and provides good French coverage.
+ * French TV/Movie tracking service with subtitle support.
+ * Aggregates subtitles from multiple sources.
  * 
  * API Documentation: https://developers.betaseries.com/
  * 
@@ -16,7 +15,6 @@
  * - vo = Original Version (English)
  * - vf = French Version
  * 
- * Note: BetaSeries primarily supports French and English subtitles.
  */
 
 const { BaseProvider, SubtitleResult } = require('./BaseProvider');
@@ -43,11 +41,9 @@ class BetaSeriesProvider extends BaseProvider {
             this.enabled = false;
         }
         
-        // Cache for show/episode ID lookups (avoid repeated API calls)
         this._showCache = new Map();      // imdbId -> betaseriesShowId
         this._episodeCache = new Map();   // showId:season:episode -> betaseriesEpisodeId
         
-        // Track unique sources we've seen (dynamically discovered)
         this._discoveredSources = new Set(['betaseries']);
     }
 
@@ -103,12 +99,10 @@ class BetaSeriesProvider extends BaseProvider {
      * @private
      */
     async _getShowId(imdbId) {
-        // Check cache
         if (this._showCache.has(imdbId)) {
             return this._showCache.get(imdbId);
         }
         
-        // Try IMDB ID lookup
         const result = await this._apiRequest('/shows/display', { imdb_id: imdbId });
         
         if (result && result.show) {
@@ -128,22 +122,18 @@ class BetaSeriesProvider extends BaseProvider {
     async _getEpisodeId(showId, season, episode) {
         const cacheKey = `${showId}:${season}:${episode}`;
         
-        // Check cache
         if (this._episodeCache.has(cacheKey)) {
             return this._episodeCache.get(cacheKey);
         }
         
-        // Fetch all episodes for the show
         const result = await this._apiRequest('/shows/episodes', { id: showId });
         
         if (result && result.episodes) {
-            // Cache all episodes while we have them
             for (const ep of result.episodes) {
                 const key = `${showId}:${ep.season}:${ep.episode}`;
                 this._episodeCache.set(key, ep.id);
             }
             
-            // Return the requested episode
             return this._episodeCache.get(cacheKey) || null;
         }
         
@@ -187,7 +177,6 @@ class BetaSeriesProvider extends BaseProvider {
                 return [];
             }
 
-            // Get show ID from IMDB
             const showId = await this._getShowId(query.imdbId);
             if (!showId) {
                 log('debug', `[BetaSeries] Show not found: ${query.imdbId}`);
@@ -195,7 +184,6 @@ class BetaSeriesProvider extends BaseProvider {
                 return [];
             }
 
-            // Get episode ID
             const episodeId = await this._getEpisodeId(showId, query.season, query.episode);
             if (!episodeId) {
                 log('debug', `[BetaSeries] Episode not found: S${query.season}E${query.episode}`);
@@ -203,13 +191,11 @@ class BetaSeriesProvider extends BaseProvider {
                 return [];
             }
 
-            // Determine language filter using unified language module
             let bsLanguage = null;
             if (query.language) {
                 bsLanguage = toBetaseriesCode(query.language) || toBetaseriesCode(query.language.toLowerCase());
             }
 
-            // Fetch subtitles
             const params = { id: episodeId };
             if (bsLanguage) {
                 params.language = bsLanguage;
@@ -223,14 +209,12 @@ class BetaSeriesProvider extends BaseProvider {
                 return [];
             }
 
-            // Track discovered sources dynamically
             result.subtitles.forEach(sub => {
                 if (sub.source) {
                     this._discoveredSources.add(sub.source.toLowerCase());
                 }
             });
 
-            // Normalize results
             const subtitles = result.subtitles.map(sub => this._normalizeResult(sub, query));
             
             const fetchTime = Date.now() - startTime;
@@ -256,7 +240,6 @@ class BetaSeriesProvider extends BaseProvider {
         const isZip = fileNameLower.endsWith('.zip');
         const isAss = fileNameLower.endsWith('.ass') || fileNameLower.endsWith('.ssa');
         
-        // Determine format based on file extension
         let format = 'srt';
         let needsConversion = false;
         
@@ -264,35 +247,25 @@ class BetaSeriesProvider extends BaseProvider {
             format = 'ass';
             needsConversion = true;
         } else if (isZip) {
-            // ZIP format is determined after extraction - assume SRT for now
-            // The ZIP proxy will handle ASS detection and conversion
-            format = 'srt';
+            format = 'srt'; // Assuming it's an srt until zip exctraction
             needsConversion = false;
         }
         
-        // Determine the URL to use
         let url;
         
         if (isZip) {
-            // Use proxy for ZIP extraction
-            // We'll extract the file matching the requested language
             const langParam = toBetaseriesCode(query.language) || sub.language?.toLowerCase() || 'vo';
             url = `${this.baseUrl}/api/betaseries/proxy/${sub.id}?lang=${langParam}`;
         } else if (isAss) {
-            // Direct ASS file - will be routed through formatForStremio dual-format handling
-            // which uses /api/subtitle/ass/ and /api/subtitle/srt/ proxies
             url = sub.url;
         } else {
-            // Direct SRT URL (BetaSeries redirects to actual SRT file)
             url = sub.url;
         }
         
-        // Map BetaSeries language to ISO 639-2 using unified module
         const bsLang = sub.language || 'VO';
         const langEntry = getByBetaseriesCode(bsLang);
         const languageCode = langEntry ? langEntry.alpha3B : 'eng';
         
-        // Build display name using unified module
         const langDisplay = langEntry ? langEntry.name : (bsLang === 'VF' ? 'French' : bsLang === 'VO' ? 'English' : bsLang);
         const display = `[${sub.source || 'betaseries'}] ${langDisplay}`;
         

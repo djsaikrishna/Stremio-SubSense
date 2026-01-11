@@ -24,12 +24,10 @@ function getEncryptionKey() {
         throw new Error('SUBSENSE_ENCRYPTION_KEY environment variable is required for encryption');
     }
     
-    // If key is exactly 32 bytes (64 hex chars), use directly
     if (/^[a-fA-F0-9]{64}$/.test(envKey)) {
         return Buffer.from(envKey, 'hex');
     }
     
-    // Otherwise, derive a key using PBKDF2
     const salt = 'subsense-config-v1';
     return crypto.pbkdf2Sync(envKey, salt, 100000, KEY_LENGTH, 'sha256');
 }
@@ -55,11 +53,8 @@ function encryptConfig(config) {
         ]);
         
         const authTag = cipher.getAuthTag();
-        
-        // Format: IV (12 bytes) + AuthTag (16 bytes) + Encrypted data
         const combined = Buffer.concat([iv, authTag, encrypted]);
         
-        // URL-safe base64 encoding
         return combined.toString('base64url');
     } catch (error) {
         log('error', `[Crypto] Encryption failed: ${error.message}`);
@@ -76,14 +71,12 @@ function decryptConfig(encryptedData) {
     try {
         const key = getEncryptionKey();
         
-        // Decode from URL-safe base64
         const combined = Buffer.from(encryptedData, 'base64url');
         
         if (combined.length < IV_LENGTH + AUTH_TAG_LENGTH + 1) {
             throw new Error('Invalid encrypted data: too short');
         }
         
-        // Extract components
         const iv = combined.subarray(0, IV_LENGTH);
         const authTag = combined.subarray(IV_LENGTH, IV_LENGTH + AUTH_TAG_LENGTH);
         const encrypted = combined.subarray(IV_LENGTH + AUTH_TAG_LENGTH);

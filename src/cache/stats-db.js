@@ -6,8 +6,7 @@ const { log } = require('../utils');
 const { toAlpha3B } = require('../languages');
 
 /**
- * Get local date string in YYYY-MM-DD format
- * Uses local timezone instead of UTC to match user expectations
+ * Get local date string in YYYY-MM-DD format (uses local timezone)
  */
 function getLocalDateString() {
     const now = new Date();
@@ -49,13 +48,11 @@ const getActiveUsersCountStmt = db.prepare(`
     WHERE last_active > strftime('%s', 'now') - ?
 `);
 
-// Get users active within a specific time window (between startSeconds and endSeconds ago)
 const getActiveUsersInWindowStmt = db.prepare(`
     SELECT COUNT(*) as count FROM user_tracking 
     WHERE last_active <= ? AND last_active > ?
 `);
 
-// Get users active on a specific calendar day (using absolute timestamps)
 const getActiveUsersOnDayStmt = db.prepare(`
     SELECT COUNT(*) as count FROM user_tracking 
     WHERE last_active >= ? AND last_active < ?
@@ -181,7 +178,6 @@ class StatsDB {
     logRequest(data) {
         try {
             // Normalize to alpha3B and sort alphabetically for consistent combinations
-            // (e.g., ["fr","en"], ["en","fr"], ["eng","fre"] all become ["eng","fre"])
             const normalizedLanguages = (data.languages || [])
                 .map(lang => {
                     const normalized = toAlpha3B(lang);
@@ -274,7 +270,6 @@ class StatsDB {
                 today
             );
             
-            // If no row was updated, insert a new one
             if (result.changes === 0) {
                 const insertStmt = db.prepare(`
                     INSERT INTO provider_stats 
@@ -389,7 +384,6 @@ class StatsDB {
      */
     getLanguageMatchSummary(days = 30) {
         try {
-            // Get aggregate stats across all languages
             const aggregateStmt = db.prepare(`
                 SELECT 
                     SUM(found_count) as found,
@@ -400,7 +394,6 @@ class StatsDB {
             `);
             const aggregate = aggregateStmt.get(days);
             
-            // Get per-language success rates
             const perLangStmt = db.prepare(`
                 SELECT 
                     language_code,
@@ -521,7 +514,7 @@ class StatsDB {
             const rows = stmt.all(days);
             
             // Merge combinations that have the same languages in different orders or formats
-            // (e.g., ["en","fr"], ["fr","en"], ["eng","fre"] all become "ENG, FRE")
+            // (["en","fr"], ["fr","en"], ["eng","fre"] all become "ENG, FRE")
             const combinationMap = new Map();
             
             for (const row of rows) {
@@ -541,11 +534,9 @@ class StatsDB {
                     .sort();
                 const key = normalizedLangs.join(', ');
                 
-                // Merge counts for same combination
                 combinationMap.set(key, (combinationMap.get(key) || 0) + row.count);
             }
             
-            // Convert map to array, sort by count, and limit
             return Array.from(combinationMap.entries())
                 .map(([languages, count]) => ({ languages, count }))
                 .sort((a, b) => b.count - a.count)
@@ -668,7 +659,6 @@ class StatsDB {
      */
     searchCacheByImdb(imdbId) {
         try {
-            // Get summary for this IMDB ID
             const summaryStmt = db.prepare(`
                 SELECT 
                     imdb_id,
@@ -689,7 +679,6 @@ class StatsDB {
                 return null;
             }
             
-            // Aggregate totals
             const totalSubtitles = results.reduce((sum, r) => sum + r.subtitle_count, 0);
             const uniqueLanguages = new Set(results.map(r => r.language)).size;
             const allSources = new Set();
@@ -722,7 +711,7 @@ class StatsDB {
      */
     trackUserRequest(userId, requestData) {
         if (!userId) {
-            return; // No session ID means no analytics (legacy manifest)
+            return;
         }
         
         const { imdbId, contentType, languages, season, episode } = requestData;
@@ -732,10 +721,8 @@ class StatsDB {
             const isSeries = contentType === 'series' ? 1 : 0;
             const languagesJson = JSON.stringify(languages || []);
             
-            // Update or insert session stats
             insertUserStmt.run(userId, languagesJson, isMovie, isSeries);
             
-            // Log the content request
             insertContentLogStmt.run(userId, imdbId, contentType, season || null, episode || null);
             
             log('debug', `Session ${userId}: ${contentType} ${imdbId}`);

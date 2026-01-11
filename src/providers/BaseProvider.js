@@ -1,12 +1,5 @@
 /**
  * BaseProvider - Abstract base class for subtitle providers
- * 
- * All subtitle providers must extend this class and implement the required methods.
- * This enables:
- * - Adding more providers independently
- * - Replacing providers if needed
- * - Per-provider statistics
- * - Testing/mocking providers
  */
 
 class BaseProvider {
@@ -23,7 +16,6 @@ class BaseProvider {
         this.options = options;
         this.enabled = options.enabled !== false;
         
-        // Per-provider stats
         this.stats = {
             requests: 0,
             successfulRequests: 0,
@@ -99,7 +91,6 @@ class BaseProvider {
             this.stats.lastError = error ? error.message : 'Unknown error';
         }
         
-        // Also record to database
         this._recordToDatabase(success, fetchTimeMs, subtitleCount);
     }
     
@@ -109,13 +100,11 @@ class BaseProvider {
      */
     _recordToDatabase(success, responseMs, subtitlesCount) {
         try {
-            // Lazy-load statsDB to avoid circular dependencies
             if (!this._statsDB) {
                 try {
                     const cache = require('../cache');
                     this._statsDB = cache.statsDB;
                 } catch (e) {
-                    // Cache not available, skip DB recording
                     return;
                 }
             }
@@ -129,7 +118,6 @@ class BaseProvider {
                 });
             }
         } catch (error) {
-            // Silently fail - don't break functionality for stats
         }
     }
 
@@ -186,7 +174,6 @@ class SubtitleResult {
         this.downloadCount = downloadCount;
         this.display = display;
         
-        // Format hints
         this.format = format;
         this.needsConversion = needsConversion;
     }

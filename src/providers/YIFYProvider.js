@@ -1,8 +1,8 @@
 /**
- * YIFYProvider - Subtitle provider for YIFY/YTS subtitles
+ * YIFYProvider
+ * Subtitle provider for YIFY/YTS subtitles
  * 
  * Supports: Movies only
- * Languages: Multiple (40+ languages)
  * 
  * URL Structure:
  * - yts-subs.com uses Base64-encoded data-link attribute for downloads

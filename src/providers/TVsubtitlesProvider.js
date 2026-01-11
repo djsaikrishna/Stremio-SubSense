@@ -1,8 +1,8 @@
 /**
- * TVsubtitlesProvider - Subtitle provider for TV series from TVsubtitles.net
+ * TVsubtitlesProvider
+ * Subtitle provider for TV series from TVsubtitles.net
  * 
  * Supports: TV Series only
- * Languages: Multiple (40+ languages)
  * 
  * URL Patterns:
  * - Season page: http://www.tvsubtitles.net/tvshow-{showId}-{season}.html
@@ -38,7 +38,6 @@ class TVsubtitlesProvider extends BaseProvider {
         this.supportedTypes = ['series'];
         this.baseUrl = options.baseUrl || process.env.SUBSENSE_BASE_URL || `http://127.0.0.1:${process.env.PORT || 3100}`;
         
-        // Cache show IDs to avoid repeated searches
         this._showIdCache = new Map();
     }
 
@@ -66,7 +65,6 @@ class TVsubtitlesProvider extends BaseProvider {
             return [];
         }
 
-        // TVsubtitles only supports series
         if (query.season == null || query.episode == null) {
             log('debug', `[TVsubtitlesProvider] Skipping - requires season and episode`);
             return [];
@@ -161,7 +159,6 @@ class TVsubtitlesProvider extends BaseProvider {
         if (s1 === s2) return 1;
         if (s1.length < 2 || s2.length < 2) return 0;
         
-        // Create bigrams
         const getBigrams = (str) => {
             const bigrams = new Set();
             for (let i = 0; i < str.length - 1; i++) {
@@ -186,7 +183,6 @@ class TVsubtitlesProvider extends BaseProvider {
      * @private
      */
     async _getShowId(seriesName) {
-        // Check cache first
         if (this._showIdCache.has(seriesName)) {
             return this._showIdCache.get(seriesName);
         }
@@ -210,7 +206,7 @@ class TVsubtitlesProvider extends BaseProvider {
             $('a[href^="/tvshow-"]').each((i, el) => {
                 const href = $(el).attr('href');
                 const text = $(el).text().trim();
-                // Extract just the show name (remove year range like "2008-2009")
+                // Extract just the show name (remove year range)
                 const showName = text.replace(/\s*\(\d{4}-\d{4}\)\s*$/, '').trim();
                 const match = href.match(/tvshow-(\d+)/);
                 if (match) {
@@ -276,17 +272,11 @@ class TVsubtitlesProvider extends BaseProvider {
         const results = [];
         const episodePattern = `${season}x${String(episode).padStart(2, '0')}`;
 
-        // Find the correct episode row
         $('tr').each((i, row) => {
             const $row = $(row);
             const firstTd = $row.find('td').first().text().trim();
 
             if (firstTd !== episodePattern) return;
-
-            // Found the episode row - parse all language flags
-            // Each flag links to either:
-            // - episode-{id}-{lang}.html (multiple subs for this language)
-            // - subtitle-{id}.html (single sub, flag indicates language)
             
             $row.find('img[src*="flags/"]').each((j, img) => {
                 try {
@@ -297,7 +287,7 @@ class TVsubtitlesProvider extends BaseProvider {
                     if (!langMatch) return;
                     
                     const tvsLangCode = langMatch[1];
-                    if (tvsLangCode === 'blank') return; // Skip blank flags
+                    if (tvsLangCode === 'blank') return;
                     
                     const langEntry = getByTvsubtitlesCode(tvsLangCode);
                     const langInfo = langEntry 
@@ -321,13 +311,11 @@ class TVsubtitlesProvider extends BaseProvider {
                     let subtitleId = null;
 
                     if (href.includes('episode-')) {
-                        // Multiple subtitles available - links to episode-{id}-{lang}.html
-                        subtitleType = 'episode-page';
+                        subtitleType = 'episode-page'; // Multiple subtitles available - links to episode-{id}-{lang}.html
                         const match = href.match(/episode-(\d+)-/);
                         if (match) subtitleId = match[1];
                     } else if (href.includes('subtitle-')) {
-                        // Single subtitle - links directly to subtitle-{id}.html
-                        subtitleType = 'subtitle-direct';
+                        subtitleType = 'subtitle-direct'; // Single subtitle - links directly to subtitle-{id}.html
                         const match = href.match(/subtitle-(\d+)/);
                         if (match) subtitleId = match[1];
                     }
@@ -336,17 +324,13 @@ class TVsubtitlesProvider extends BaseProvider {
 
                     const fullUrl = href.startsWith('http') ? href : `${BASE_URL}/${href}`;
 
-                    // Build proxy URL with episodeUrl if needed
                     let proxyUrl = `${this.baseUrl}/api/tvsubtitles/proxy/${subtitleId}?lang=${tvsLangCode}`;
                     if (subtitleType === 'episode-page') {
-                        // For episode pages, we need to pass the URL so the proxy can resolve the subtitle
                         proxyUrl += `&episodeUrl=${encodeURIComponent(fullUrl)}`;
                     }
 
-                    // Create the subtitle result
                     const subtitleResult = new SubtitleResult({
                         id: `tvsubtitles-${subtitleId}-${tvsLangCode}`,
-                        // URL points to our proxy endpoint which handles all the heavy lifting
                         url: proxyUrl,
                         language: langInfo.code,
                         languageCode: langInfo.code,
@@ -354,11 +338,10 @@ class TVsubtitlesProvider extends BaseProvider {
                         provider: 'tvsubtitles',
                         releaseName: `S${season}E${String(episode).padStart(2, '0')}`,
                         display: langInfo.display,
-                        format: 'srt',  // TVsubtitles typically provides SRT in ZIP
+                        format: 'srt',
                         needsConversion: false
                     });
                     
-                    // Store metadata for download URL resolution (as a direct property)
                     subtitleResult._tvsMetadata = {
                         subtitleType,
                         subtitleId,
@@ -391,7 +374,6 @@ class TVsubtitlesProvider extends BaseProvider {
 
         let finalSubtitleId = metadata.subtitleId;
 
-        // If this is an episode page, we need to fetch it to get actual subtitle ID
         if (metadata.subtitleType === 'episode-page') {
             const episodeUrl = `${BASE_URL}/episode-${metadata.subtitleId}-${metadata.langCode}.html`;
             log('debug', `[TVsubtitlesProvider] Fetching episode page: ${episodeUrl}`);
@@ -406,7 +388,6 @@ class TVsubtitlesProvider extends BaseProvider {
             const html = await response.text();
             const $ = cheerio.load(html);
 
-            // Get first subtitle link
             const subtitleLink = $('a[href*="/subtitle-"]').first().attr('href');
             if (!subtitleLink) {
                 throw new Error('No subtitle found on episode page');
@@ -420,7 +401,6 @@ class TVsubtitlesProvider extends BaseProvider {
             finalSubtitleId = match[1];
         }
 
-        // Fetch download page and parse JavaScript
         const downloadPageUrl = `${BASE_URL}/download-${finalSubtitleId}.html`;
         log('debug', `[TVsubtitlesProvider] Fetching download page: ${downloadPageUrl}`);
 
@@ -433,8 +413,6 @@ class TVsubtitlesProvider extends BaseProvider {
 
         const html = await response.text();
 
-        // Parse JavaScript to extract filename
-        // Pattern: var s1= 'fil'; var s2= 'es/B'; var s3= 're'; var s4= 'aking Bad_1x01_es.zip';
         const jsMatch = html.match(/var\s+s1\s*=\s*['"]([^'"]+)['"][\s\S]*?var\s+s2\s*=\s*['"]([^'"]+)['"][\s\S]*?var\s+s3\s*=\s*['"]([^'"]+)['"][\s\S]*?var\s+s4\s*=\s*['"]([^'"]+)['"]/);
 
         if (!jsMatch) {

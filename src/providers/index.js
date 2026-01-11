@@ -6,7 +6,6 @@
  * subtitle logic from any specific provider implementation.
  * 
  * Usage:
- * ```javascript
  * const { providerManager, WyzieProvider } = require('./providers');
  * 
  * // Register providers
@@ -18,7 +17,6 @@
  *   season: 1,
  *   episode: 5
  * });
- * ```
  * 
  * Adding a new provider:
  * 1. Create a new file (e.g., OpenSubtitlesProvider.js)
@@ -42,19 +40,19 @@ const SubSourceProvider = require('./SubSourceProvider');
 function isProviderEnabled(providerName) {
     const sources = process.env.SUBTITLE_SOURCES;
     if (!sources) {
-        // If no sources specified, enable all providers
-        return true;
+        return true;  // If no sources specified, enable all providers
     }
     const sourceList = sources.split(',').map(s => s.trim().toLowerCase());
     return sourceList.includes(providerName.toLowerCase());
 }
 
-// Initialize default providers
 function initializeDefaultProviders() {
+    // Wyzie provider for general subtitles
     if (!providerManager.get('wyzie') && isProviderEnabled('wyzie')) {
         providerManager.register(new WyzieProvider());
     }
     
+    // BetaSeries provider for TV series subtitles in French and English
     if (!providerManager.get('betaseries') && isProviderEnabled('betaseries')) {
         if (process.env.BETASERIES_API_KEY) {
             providerManager.register(new BetaSeriesProvider());

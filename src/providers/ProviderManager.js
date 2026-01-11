@@ -1,12 +1,6 @@
 /**
  * ProviderManager - Manages multiple subtitle providers
  * 
- * Responsibilities:
- * - Register/unregister providers
- * - Query all enabled providers
- * - Aggregate results from multiple providers
- * - Per-provider statistics
- * - Handle provider failures gracefully
  */
 
 const { log } = require('../utils');
@@ -127,7 +121,6 @@ class ProviderManager {
             return [];
         }
 
-        // Use searchByLanguages if provider supports it, otherwise regular search
         const results = await Promise.allSettled(
             enabledProviders.map(provider => {
                 if (typeof provider.searchByLanguages === 'function') {
@@ -173,7 +166,6 @@ class ProviderManager {
     }
 }
 
-// Singleton instance
 const providerManager = new ProviderManager();
 
 module.exports = {

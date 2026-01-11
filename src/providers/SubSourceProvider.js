@@ -1,11 +1,9 @@
 /**
  * SubSourceProvider - Subtitle provider using SubSource API
- * 
- * SubSource is a separate database from Wyzie's sources, providing significantly
- * more subtitles for many titles. It requires a user-provided API key.
+ * Requires user API key per request
  * 
  * API: https://api.subsource.net/api/v1
- * - Uses full language words (e.g., 'english'), NOT ISO codes
+ * - Uses full language words (e.g., 'english')
  * - Returns ZIP files for all downloads
  * - TV series returns per-season results, episode info in releaseInfo
  */
@@ -34,7 +32,6 @@ class SubSourceProvider extends BaseProvider {
         
         this.enabled = options.enabled !== false;
         
-        // Cache: IMDB ID → { movieId, type, season }
         this._movieCache = new Map();
     }
 
@@ -52,8 +49,6 @@ class SubSourceProvider extends BaseProvider {
                 url.searchParams.set(key, value);
             }
         }
-        
-        log('debug', `[SubSource] API: ${endpoint} params=${JSON.stringify(params)}`);
         
         try {
             const response = await fetch(url.toString(), {
@@ -120,13 +115,11 @@ class SubSourceProvider extends BaseProvider {
             
             if (result.pagination) {
                 totalPages = result.pagination.pages || 1;
-                log('debug', `[SubSource] Fetched page ${page}/${totalPages} (${result.data.length} subs)`);
             }
             
             page++;
         } while (page <= totalPages);
         
-        log('debug', `[SubSource] Total fetched: ${allSubtitles.length} subtitles`);
         return allSubtitles;
     }
 
@@ -185,7 +178,6 @@ class SubSourceProvider extends BaseProvider {
         }
         
         try {
-            // Find the movieId for this content
             const movieInfo = await this._findMovieId(query.apiKey, query.imdbId, query.season);
             
             if (!movieInfo) {
@@ -194,7 +186,6 @@ class SubSourceProvider extends BaseProvider {
                 return [];
             }
             
-            // Convert language to SubSource format using centralized languages.js
             const subSourceLang = query.language ? toSubsourceCode(query.language) : null;
             
             if (query.language && !subSourceLang) {
@@ -203,7 +194,6 @@ class SubSourceProvider extends BaseProvider {
                 return [];
             }
             
-            // Fetch all subtitles with pagination (some titles have 200+ subs)
             let subtitles = await this._fetchAllSubtitles(
                 query.apiKey, 
                 movieInfo.movieId, 
@@ -216,16 +206,11 @@ class SubSourceProvider extends BaseProvider {
             }
             
             // Pre-filter to exclude clear episode mismatches
-            const beforeCount = subtitles.length;
             const filterResults = await Promise.all(
                 subtitles.map(sub => this._shouldIncludeSubtitle(sub, query))
             );
             subtitles = subtitles.filter((_, index) => filterResults[index]);
-            if (subtitles.length < beforeCount) {
-                log('debug', `[SubSource] Pre-filtered ${beforeCount - subtitles.length} episode mismatches (${subtitles.length} remaining)`);
-            }
             
-            // Convert to SubtitleResult format
             const results = subtitles.map(sub => this._toSubtitleResult(sub, query));
             
             const fetchTime = Date.now() - startTime;
@@ -264,41 +249,29 @@ class SubSourceProvider extends BaseProvider {
         const requestedEpisode = parseInt(query.episode, 10);
         const requestedSeason = parseInt(query.season, 10);
         
-        // Parser first
         try {
             const parse = await getFilenameParser();
-            const parsed = parse(releaseInfo, true); // isTv = true
+            const parsed = parse(releaseInfo, true);
             
             if (parsed.episodeNumbers && parsed.episodeNumbers.length > 0) {
                 if (!parsed.episodeNumbers.includes(requestedEpisode)) {
-                    log('debug', `[SubSource] Excluding (parser): "${releaseInfo.substring(0, 50)}..." - E${parsed.episodeNumbers.join(',')} != E${requestedEpisode}`);
                     return false;
                 }
-                
-                if (parsed.seasons && parsed.seasons.length > 0) {
-                    if (!parsed.seasons.includes(requestedSeason)) {
-                        log('debug', `[SubSource] Excluding (parser): "${releaseInfo.substring(0, 50)}..." - S${parsed.seasons.join(',')} != S${requestedSeason}`);
-                        return false;
-                    }
+                if (parsed.seasons && parsed.seasons.length > 0 && !parsed.seasons.includes(requestedSeason)) {
+                    return false;
                 }
-                
                 return true;
             }
-        } catch (err) {
-            log('debug', `[SubSource] Parser error for "${releaseInfo.substring(0, 30)}": ${err.message}`);
-        }
+        } catch (err) {}
         
-        // Fallback regex patterns for cases parser doesn't handle well
+        // Fallback regex patterns for some cases
         // Pattern A: "Episode XXX" or "EP XXX" (handles Episode 1000 etc)
-        // Careful with 4-digit numbers to not confuse with years (1900-2099)
         const episodeWordPattern = /\b(?:Episode|EP)[.\-_\s]*(\d{1,4})\b/i;
         const episodeWordMatch = releaseInfo.match(episodeWordPattern);
         if (episodeWordMatch) {
             const fileEpisode = parseInt(episodeWordMatch[1], 10);
-            // Avoid year confusion: if 4 digits and looks like a year, skip
             if (fileEpisode >= 1900 && fileEpisode <= 2099) {
             } else if (fileEpisode !== requestedEpisode) {
-                log('debug', `[SubSource] Excluding (Episode pattern): "${releaseInfo.substring(0, 50)}..." - E${fileEpisode} != E${requestedEpisode}`);
                 return false;
             } else {
                 return true;
@@ -312,7 +285,6 @@ class SubSourceProvider extends BaseProvider {
             const fileSeason = parseInt(xMatch[1], 10);
             const fileEpisode = parseInt(xMatch[2], 10);
             if (fileSeason !== requestedSeason || fileEpisode !== requestedEpisode) {
-                log('debug', `[SubSource] Excluding (NxNN pattern): "${releaseInfo.substring(0, 50)}..." - ${fileSeason}x${fileEpisode} != ${requestedSeason}x${requestedEpisode}`);
                 return false;
             }
             return true;
@@ -327,16 +299,13 @@ class SubSourceProvider extends BaseProvider {
                 const fileEpisode = parseInt(animeMatch[1], 10);
                 if (fileEpisode > 0 && fileEpisode <= 2000 && fileEpisode !== requestedEpisode) {
                     if (![720, 1080, 480, 2160, 576, 360].includes(fileEpisode)) {
-                        log('debug', `[SubSource] Excluding (anime pattern): "${releaseInfo.substring(0, 50)}..." - E${fileEpisode} != E${requestedEpisode}`);
                         return false;
                     }
                 }
             }
         }
         
-        // Original fallback patterns
-        
-        // Pattern D: Episode RANGE like S01E01-E12 (episode pack)
+        // Pattern D: Episode range like S01E01-E12 (episode pack)
         const rangePattern = /[sS](\d{1,2})[.\-_]?[eE](\d{1,4})\-[eE]?(\d{1,4})/;
         const rangeMatch = releaseInfo.match(rangePattern);
         if (rangeMatch) {
@@ -345,18 +314,15 @@ class SubSourceProvider extends BaseProvider {
             const endEp = parseInt(rangeMatch[3], 10);
             
             if (fileSeason !== requestedSeason) {
-                log('debug', `[SubSource] Excluding "${releaseInfo.substring(0, 50)}..." - S${fileSeason} != S${requestedSeason}`);
                 return false;
             }
-            
             if (requestedEpisode < startEp || requestedEpisode > endEp) {
-                log('debug', `[SubSource] Excluding "${releaseInfo.substring(0, 50)}..." - E${requestedEpisode} not in E${startEp}-E${endEp}`);
                 return false;
             }
             return true;
         }
         
-        // Pattern E: S01E13 (standard pattern - should have been caught by parser, but double-check)
+        // Pattern E: S##E## (standard pattern)
         const fullPattern = /[sS](\d{1,2})[.\-_]?[eE](\d{1,4})(?!\d)/;
         const fullMatch = releaseInfo.match(fullPattern);
         if (fullMatch) {
@@ -364,7 +330,6 @@ class SubSourceProvider extends BaseProvider {
             const fileEpisode = parseInt(fullMatch[2], 10);
             
             if (fileSeason !== requestedSeason || fileEpisode !== requestedEpisode) {
-                log('debug', `[SubSource] Excluding "${releaseInfo.substring(0, 50)}..." - S${fileSeason}E${fileEpisode} != S${requestedSeason}E${requestedEpisode}`);
                 return false;
             }
             return true;
@@ -406,7 +371,6 @@ class SubSourceProvider extends BaseProvider {
         const queryStr = params.toString();
         const downloadUrl = `${this.baseUrl}/api/subsource/proxy/${sub.subtitleId}/${encodeURIComponent(sanitizedRelease)}${queryStr ? '?' + queryStr : ''}`;
         
-        // Use centralized language functions
         const lang = getBySubsourceCode(sub.language);
         const stremioCode = lang ? toAlpha3B(lang.alpha2) : 'und';
         const displayName = lang ? getDisplayName(lang.alpha2) : sub.language;
@@ -436,7 +400,7 @@ class SubSourceProvider extends BaseProvider {
     async validateApiKey(apiKey) {
         const result = await this._apiRequest(apiKey, '/movies/search', {
             searchType: 'imdb',
-            imdb: 'tt1375666' // Inception - known to exist
+            imdb: 'tt1375666' // Inception
         });
         
         if (result.error === 'invalid_api_key') {

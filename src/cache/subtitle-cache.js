@@ -36,10 +36,8 @@ class SubtitleCache {
                 return null;
             }
             
-            // Check if any entry needs refresh (older than REFRESH_INTERVAL)
             const needsRefresh = rows.some(row => row.age_seconds > REFRESH_INTERVAL);
             
-            // Convert DB rows to subtitle objects
             const subtitles = rows.map(row => ({
                 id: row.subtitle_id,
                 url: row.url,

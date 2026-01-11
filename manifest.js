@@ -8,7 +8,6 @@ const packageJson = require('./package.json');
  * @returns {string} Description string
  */
 function generateDescription(config = {}) {
-    // Require languages array
     if (!config.languages || config.languages.length === 0) {
         return 'Subtitle aggregator that fetches subtitles in your selected languages from multiple sources including OpenSubtitles, SubDL, Podnapisi, and more.';
     }

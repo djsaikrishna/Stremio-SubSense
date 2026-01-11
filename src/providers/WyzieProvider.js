@@ -1,7 +1,8 @@
 /**
- * WyzieProvider - Subtitle provider using wyzie-lib
+ * WyzieProvider
+ * Subtitle provider using wyzie-lib
  * 
- * Wyzie aggregates subtitles from multiple sources:
+ * Wyzie aggregates subtitles from:
  * - OpenSubtitles
  * - SubDL
  * - Subf2m
@@ -13,7 +14,6 @@
  * - Query all sources in parallel for primary language
  * - Return as soon as minSubtitles threshold is met
  * - Continue fetching in background for caching
- * - Fallback to secondary language if 0 primary found
  */
 
 const { searchSubtitles } = require('wyzie-lib');
@@ -62,7 +62,6 @@ class WyzieProvider extends BaseProvider {
             log('debug', `[WyzieProvider] Using sources from WYZIE_SOURCES: ${sources.join(', ')}`);
             return sources;
         }
-        // Fall back to DEFAULT_SOURCES
         log('debug', `[WyzieProvider] Using default sources: ${DEFAULT_SOURCES.join(', ')}`);
         return DEFAULT_SOURCES;
     }
@@ -100,7 +99,6 @@ class WyzieProvider extends BaseProvider {
             const results = await searchSubtitles(params);
             const subtitles = Array.isArray(results) ? results : [];
             
-            // Normalize results to SubtitleResult format
             const normalized = subtitles.map(sub => this._normalizeResult(sub));
             
             const fetchTimeMs = Date.now() - startTime;
@@ -135,7 +133,6 @@ class WyzieProvider extends BaseProvider {
             return { subtitles: [], fromCache: false, backgroundPromise: null };
         }
 
-        // Check cache first
         const cacheKey = this._getCacheKey(query);
         const cached = this._backgroundCache.get(cacheKey);
         if (cached && cached.subtitles) {
@@ -146,7 +143,6 @@ class WyzieProvider extends BaseProvider {
 
         const startTime = Date.now();
         
-        // State for tracking collected subtitles
         const state = {
             allSubtitles: [],
             primarySubtitles: [],
@@ -157,7 +153,7 @@ class WyzieProvider extends BaseProvider {
             seenUrls: new Set() // For deduplication by URL
         };
 
-        // Create parallel promises for each source WITH primary language filter (fast)
+        // Create parallel promises for each source (fast)
         const sourcePromises = this.sources.map(source => 
             this._searchSource(query, source, primaryLang)
                 .then(subs => {
@@ -171,7 +167,7 @@ class WyzieProvider extends BaseProvider {
                 })
         );
         
-        // Create background promises WITHOUT language filter (for full caching)
+        // Create background promises with no language filter (caching)
         const backgroundState = {
             allSubtitles: [],
             seenUrls: new Set(),
@@ -205,23 +201,20 @@ class WyzieProvider extends BaseProvider {
                     state.resolved = true;
                     const fetchTimeMs = Date.now() - startTime;
                     log('info', `[WyzieProvider] Fast-first: returning ${state.primarySubtitles.length} primary subs in ${fetchTimeMs}ms (threshold met)`);
-                    resolve(state.primarySubtitles.slice(0, this.minSubtitles * 10)); // Return up to 10x threshold
+                    resolve(state.primarySubtitles.slice(0, this.minSubtitles * 20));
                 }
             };
 
-            // Check after initial delay to allow first sources to respond
             const checkInterval = setInterval(() => {
                 checkThreshold();
                 if (state.resolved || state.sourcesCompleted >= state.totalSources) {
                     clearInterval(checkInterval);
                 }
-            }, 50); // Check every 50ms
+            }, 50);
 
-            // Also check after each source completes (via handleSourceResult callback)
             state.checkThreshold = checkThreshold;
         });
 
-        // Primary sources done promise: resolves when all primary-lang queries finish
         const primaryDonePromise = Promise.allSettled(sourcePromises).then(() => {
             if (!state.resolved) {
                 state.resolved = true;
@@ -246,7 +239,7 @@ class WyzieProvider extends BaseProvider {
             const languagesList = [...backgroundState.languagesFound].sort().join(', ');
             log('info', `[WyzieProvider] Background complete: ${backgroundState.allSubtitles.length} total subs in ${fetchTimeMs}ms (languages: ${languagesList || 'none'})`);
             
-            // Cache the full results (ALL languages)
+            // Cache the full results
             this._backgroundCache.set(cacheKey, {
                 subtitles: backgroundState.allSubtitles,
                 languages: [...backgroundState.languagesFound],
@@ -255,7 +248,6 @@ class WyzieProvider extends BaseProvider {
             
             this.updateStats(true, fetchTimeMs, backgroundState.allSubtitles.length);
             
-            // If we haven't resolved yet (threshold not met), resolve now
             if (!state.resolved) {
                 state.resolved = true;
             }
@@ -263,7 +255,6 @@ class WyzieProvider extends BaseProvider {
             return backgroundState.allSubtitles;
         });
 
-        // Wait for fast result (threshold) or all primary sources to complete
         const raceResult = await Promise.race([
             fastResultPromise,
             primaryDonePromise
@@ -292,7 +283,6 @@ class WyzieProvider extends BaseProvider {
             return { subtitles: [], fromCache: false, backgroundPromise: null };
         }
 
-        // Check cache first for all languages
         const cacheKey = this._getCacheKey(query);
         const cached = this._backgroundCache.get(cacheKey);
         if (cached && cached.subtitles) {
@@ -303,22 +293,19 @@ class WyzieProvider extends BaseProvider {
 
         const startTime = Date.now();
         
-        // State for tracking collected subtitles across all languages
         const state = {
             allSubtitles: [],
-            byLanguage: {},  // { 'en': [...], 'fr': [...], ... }
+            byLanguage: {},
             sourcesCompleted: 0,
             totalSources: this.sources.length * languages.length,
             resolved: false,
             seenUrls: new Set()
         };
         
-        // Initialize language buckets
         languages.forEach(lang => {
             state.byLanguage[lang.toLowerCase()] = [];
         });
 
-        // Create parallel promises for each language × each source
         const allLanguagePromises = [];
         
         for (const lang of languages) {
@@ -337,7 +324,6 @@ class WyzieProvider extends BaseProvider {
             allLanguagePromises.push(...langPromises);
         }
         
-        // Background promises WITHOUT language filter (for full caching)
         const backgroundState = {
             allSubtitles: [],
             seenUrls: new Set(),
@@ -364,11 +350,11 @@ class WyzieProvider extends BaseProvider {
                 })
         );
 
-        // Fast-first promise: resolves when ALL languages have at least some results or any has hit threshold
+        // Fast-first promise: resolves when all languages have at least some results or any has hit threshold
         const fastResultPromise = new Promise((resolve) => {
             const checkThreshold = () => {
                 if (!state.resolved) {
-                    // Check if ALL preferred languages have at least 1 subtitle each
+                    // Check if all preferred languages have at least 1 subtitle each
                     let allLanguagesHaveResults = true;
                     let anyLanguageHitThreshold = false;
                     let totalFromPreferred = 0;
@@ -386,8 +372,8 @@ class WyzieProvider extends BaseProvider {
                         }
                     }
                     
-                    // Resolve if ALL languages have at least 1 result and total is good enough
-                    // OR if any single language hit the threshold and we've waited a bit for others
+                    // Resolve if all languages have at least 1 result and total is good enough
+                    // OR if any single language hit the threshold and we've waited for others
                     if (allLanguagesHaveResults && totalFromPreferred >= this.minSubtitles) {
                         state.resolved = true;
                         const fetchTimeMs = Date.now() - startTime;
@@ -409,7 +395,6 @@ class WyzieProvider extends BaseProvider {
                 }
             };
 
-            // Check periodically
             const checkInterval = setInterval(() => {
                 checkThreshold();
                 if (state.resolved || state.sourcesCompleted >= state.totalSources) {
@@ -420,7 +405,6 @@ class WyzieProvider extends BaseProvider {
             state.checkThreshold = checkThreshold;
         });
 
-        // All language queries done promise
         const allDonePromise = Promise.allSettled(allLanguagePromises).then(() => {
             if (!state.resolved) {
                 state.resolved = true;
@@ -431,7 +415,6 @@ class WyzieProvider extends BaseProvider {
             return state.allSubtitles;
         });
 
-        // Background promise for caching
         const backgroundPromise = Promise.allSettled(backgroundSourcePromises).then(() => {
             const fetchTimeMs = Date.now() - startTime;
             const languagesList = [...backgroundState.languagesFound].sort().join(', ');
@@ -448,7 +431,6 @@ class WyzieProvider extends BaseProvider {
             return backgroundState.allSubtitles;
         });
 
-        // Wait for fast result or all language queries to complete
         const raceResult = await Promise.race([
             fastResultPromise,
             allDonePromise
@@ -476,7 +458,6 @@ class WyzieProvider extends BaseProvider {
             state.seenUrls.add(sub.url);
             state.allSubtitles.push(sub);
             
-            // Add to language bucket
             const subLang = (sub.language || '').toLowerCase();
             if (state.byLanguage[subLang]) {
                 state.byLanguage[subLang].push(sub);
@@ -506,7 +487,6 @@ class WyzieProvider extends BaseProvider {
             }
         }
 
-        // Return selected languages first, then others
         return [...selected, ...others];
     }
 
@@ -586,7 +566,6 @@ class WyzieProvider extends BaseProvider {
             
             state.allSubtitles.push(sub);
             
-            // Categorize by language
             const subLang = (sub.language || '').toLowerCase();
             if (primaryLang && subLang === primaryLang.toLowerCase()) {
                 state.primarySubtitles.push(sub);
@@ -595,7 +574,6 @@ class WyzieProvider extends BaseProvider {
             }
         }
 
-        // Trigger threshold check if callback exists
         if (state.checkThreshold) {
             state.checkThreshold();
         }
@@ -621,7 +599,6 @@ class WyzieProvider extends BaseProvider {
             }
         }
 
-        // Return primary, then secondary, then others
         if (primary.length > 0) {
             return [...primary, ...secondary, ...others];
         } else if (secondary.length > 0) {
@@ -703,14 +680,12 @@ class WyzieProvider extends BaseProvider {
             source: this.sources
         };
 
-        // Add season/episode for series
         if (query.season !== null && query.season !== undefined &&
             query.episode !== null && query.episode !== undefined) {
             params.season = query.season;
             params.episode = query.episode;
         }
 
-        // Add language filter if specified
         if (query.language) {
             params.language = query.language;
         }
@@ -723,7 +698,6 @@ class WyzieProvider extends BaseProvider {
      * @private
      */
     _normalizeResult(sub) {
-        // Get source - can be string or array in wyzie response
         let source = 'unknown';
         if (sub.source) {
             source = Array.isArray(sub.source) ? sub.source[0] : sub.source;
@@ -733,7 +707,7 @@ class WyzieProvider extends BaseProvider {
         const langCode = sub.lang || sub.language || 'und';
         const language = langCode.substring(0, 2).toLowerCase();
 
-        // Detect format from URL (Wyzie-specific: uses format=xxx parameter)
+        // Detect format from URL (format=xxx parameter)
         const formatInfo = this._detectFormatFromUrl(sub.url);
 
         const rawFileName = sub.fileName || null;
