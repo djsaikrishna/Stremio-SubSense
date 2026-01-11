@@ -18,11 +18,12 @@
 
 ## 🎯 Features
 
-- 🔍 **Multi-source aggregation** — Fetches subtitles from OpenSubtitles, SubDL, Podnapisi, and more
+- 🔍 **Multi-source aggregation** — Fetches subtitles from OpenSubtitles, SubDL, Podnapisi, SubSource, and more
 - 🌍 **Multi-language support** — Select up to 5 subtitle languages with equal priority
 - ⚡ **Fast-first strategy** — Returns results as soon as fastest provider responds
 - 🎨 **Easy configuration** — Simple web-based configuration interface
 - 🗄️ **Smart caching** — SQLite-based caching for faster subsequent requests
+- 🔐 **Secure API keys** — Encrypted storage of provider API keys in manifest URLs
 
 ## 📋 Table of Contents
 
@@ -50,6 +51,7 @@ Open `/configure` in your browser to access the configuration page.
 |--------|-------------|
 | **Languages** | Select up to 5 subtitle languages (English pre-selected by default) |
 | **Max Subtitles** | Limit subtitles per language (Unlimited, 3, 5, 10, 25, 50, 100) |
+| **SubSource API Key** | Optional API key for SubSource provider (get one at [subsource.net](https://subsource.net)) |
 
 ### Tips
 
@@ -71,6 +73,10 @@ services:
     environment:
       - PORT=3100
       - LOG_LEVEL=info
+      # Required for SubSource provider (generate a secure random key)
+      - SUBSENSE_ENCRYPTION_KEY=your-secure-passphrase-here
+      # Optional: BetaSeries API key for French subtitles
+      # - BETASERIES_API_KEY=your_api_key_here
     volumes:
       - ./data:/app/data  # Persist cache database
 ```
@@ -96,13 +102,30 @@ Access your addon at `http://localhost:3100`
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PORT` | 3100 | Server port |
-| `SUBSENSE_BASE_URL` | Auto-detected | Public URL (for production deployments) |
+| `SUBSENSE_BASE_URL` | Auto-detected | Public URL for production deployments |
 | `LOG_LEVEL` | info | Logging level: `debug`, `info`, `warn`, `error` |
-| `SUBTITLE_SOURCES` | All | Comma-separated list of sources |
+| `SUBSENSE_ENCRYPTION_KEY` | — | **Required to encrypt users' API keys.** Secure passphrase for encrypting API keys |
+| `SUBTITLE_SOURCES` | All | Comma-separated list of providers to enable |
+| `WYZIE_SOURCES` | All | Comma-separated list of Wyzie sources to query |
+| `BETASERIES_API_KEY` | — | API key for BetaSeries provider (French subtitles) |
 | `ENABLE_CACHE` | true | Enable/disable caching |
 | `CACHE_RETENTION_DAYS` | 30 | Days before cache cleanup |
 
-### Available Subtitle Sources
+### Available Providers
+
+These are the high-level providers that SubSense can use:
+
+| Provider | Description | Requires API Key |
+|----------|-------------|------------------|
+| `wyzie` | Aggregates multiple sources (see Wyzie Sources below) | No |
+| `subsource` | SubSource.net - Large subtitle database | Yes (per-user) |
+| `yify` | YIFY/YTS movie subtitles | No |
+| `tvsubtitles` | TVsubtitles.net for TV series | No |
+| `betaseries` | French/English subtitles | Yes (server-side) |
+
+### Wyzie Sources
+
+These are the sources queried by the `wyzie` provider:
 
 `OpenSubtitles`, `Subdl`, `Subf2m`, `Podnapisi`, `AnimeTosho`, `Gestdown`
 
