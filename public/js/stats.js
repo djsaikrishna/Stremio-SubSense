@@ -435,7 +435,6 @@ async function loadStats() {
         updateLanguageMatching(stats);
         updateCharts(stats);
         updateDailyTable(stats);
-        updateErrorsTable(stats);
         updateLastUpdated();
         
         loadCacheStats();
@@ -677,30 +676,6 @@ function updateDailyTable(stats) {
             <td>${data.total}</td>
             <td>${data.movie || 0}</td>
             <td>${data.series || 0}</td>
-        `;
-        tbody.appendChild(row);
-    });
-}
-
-function updateErrorsTable(stats) {
-    const card = document.getElementById('errorsCard');
-    const tbody = document.querySelector('#errorsTable tbody');
-    
-    const errors = stats.errors.recent || [];
-    
-    if (errors.length === 0) {
-        card.style.display = 'none';
-        return;
-    }
-
-    card.style.display = 'block';
-    tbody.innerHTML = '';
-
-    errors.reverse().forEach(error => {
-        const row = document.createElement('tr');
-        row.innerHTML = `
-            <td>${formatTime(error.timestamp)}</td>
-            <td>${escapeHtml(error.message)}</td>
         `;
         tbody.appendChild(row);
     });

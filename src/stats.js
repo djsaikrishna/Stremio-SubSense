@@ -10,7 +10,6 @@ function getStatsDB() {
             const cache = require('./cache');
             statsDB = cache.statsDB;
         } catch (e) {
-            // Cache not available
         }
     }
     return statsDB;
@@ -34,23 +33,18 @@ const stats = {
         totalRequests: 0,
         found: 0,
         notFound: 0,
-        byLanguageSuccess: {} // Track which languages are frequently found
+        byLanguageSuccess: {}
     },
     timing: {
         totalMs: 0,
         count: 0,
         minMs: Infinity,
         maxMs: 0,
-        history: [] // Keep last 100 fetch times
-    },
-    errors: {
-        total: 0,
-        recent: [] // Keep last 10 errors
+        history: []
     }
 };
 
 const HISTORY_LIMIT = 100;
-const ERROR_LIMIT = 10;
 
 /**
  * Get today's date key for daily stats (uses local timezone)
@@ -142,31 +136,15 @@ function trackRequest({ type, fetchTimeMs, subtitleCount, subtitles = [], langua
         }
     }
     
-    // Persist key counters to database
+    // Persist key counters to database (fire-and-forget - async)
     const db = getStatsDB();
     if (db) {
-        db.increment('total_requests');
-        if (type === 'movie') db.increment('total_movies');
-        if (type === 'series') db.increment('total_series');
-        db.increment('total_subtitles', subtitleCount);
-    }
-}
-
-/**
- * Track an error
- * @param {Error} error - The error object
- * @param {Object} context - Additional context
- */
-function trackError(error, context = {}) {
-    stats.errors.total++;
-    stats.errors.recent.push({
-        message: error.message,
-        timestamp: new Date().toISOString(),
-        context
-    });
-    
-    if (stats.errors.recent.length > ERROR_LIMIT) {
-        stats.errors.recent.shift();
+        Promise.all([
+            db.increment('total_requests'),
+            type === 'movie' ? db.increment('total_movies') : Promise.resolve(),
+            type === 'series' ? db.increment('total_series') : Promise.resolve(),
+            db.increment('total_subtitles', subtitleCount)
+        ]).catch(err => console.error('Stats DB error:', err.message));
     }
 }
 
@@ -175,7 +153,7 @@ function trackError(error, context = {}) {
  * Merges in-memory (session) stats with persistent (database) stats
  * @returns {Object} Statistics object
  */
-function getStats() {
+async function getStats() {
     const uptime = Date.now() - stats.startedAt.getTime();
     const avgMs = stats.timing.count > 0 
         ? Math.round(stats.timing.totalMs / stats.timing.count) 
@@ -191,37 +169,28 @@ function getStats() {
     
     const db = getStatsDB();
     if (db) {
-        persistentStats = db.getAll();
-        dailyStats = db.getDailyStats(30); // Last 30 days
-        languageMatchSummary = db.getLanguageMatchSummary(30);
-        topLanguages = db.getTopSuccessfulLanguages(30, 10);
+        // Use Promise.all for parallel async calls
+        const [persStats, dStats, langSummary, topLangs] = await Promise.all([
+            db.getAll(),
+            db.getDailyStats(30),
+            db.getLanguageMatchSummary(30),
+            db.getTopSuccessfulLanguages(30, 10)
+        ]);
         
-        // Get source and language distribution from subtitle cache
+        persistentStats = persStats || {};
+        dailyStats = dStats || [];
+        languageMatchSummary = langSummary;
+        topLanguages = topLangs || {};
+        
+        // Get source and language distribution from cache summary (O(1) read)
         try {
-            const dbConn = require('./cache/database');
-            
-            // Get subtitles by source
-            const sourceRows = dbConn.prepare(`
-                SELECT source, COUNT(*) as count 
-                FROM subtitle_cache 
-                WHERE source IS NOT NULL 
-                GROUP BY source
-            `).all();
-            sourceRows.forEach(row => {
-                sourceStats[row.source] = row.count;
-            });
-            
-            // Get subtitles by language
-            const langRows = dbConn.prepare(`
-                SELECT language, COUNT(*) as count 
-                FROM subtitle_cache 
-                WHERE language IS NOT NULL 
-                GROUP BY language
-                ORDER BY count DESC
-            `).all();
-            langRows.forEach(row => {
-                langDistribution[row.language] = row.count;
-            });
+            const cacheStats = await db.getCacheStats();
+            if (cacheStats.sourceDistribution) {
+                sourceStats = cacheStats.sourceDistribution;
+            }
+            if (cacheStats.languageDistribution) {
+                langDistribution = cacheStats.languageDistribution;
+            }
         } catch (e) {
             // Fallback to in-memory
         }
@@ -263,19 +232,18 @@ function getStats() {
         byLanguageSuccess = stats.languageMatching.byLanguageSuccess;
     }
     
-    // Get active sessions count and language success rates
+    // Get active sessions count and language success rates (async)
     if (db) {
         try {
-            const userStats = db.getAggregateUserStats();
+            const [userStats, successRates, popCombos] = await Promise.all([
+                db.getAggregateUserStats(),
+                db.getLanguageSuccessRates(30),
+                db.getPopularLanguageCombinations(30, 10)
+            ]);
             activeSessionCount = userStats?.activeSessions?.last30Days || 0;
-            
-            // Get any/all preferred rates
-            const successRates = db.getLanguageSuccessRates(30);
-            anyPreferredRate = successRates.anyPreferredRate || 0;
-            allPreferredRate = successRates.allPreferredRate || 0;
-            
-            // Get popular language combinations
-            popularCombinations = db.getPopularLanguageCombinations(30, 10);
+            anyPreferredRate = successRates?.anyPreferredRate || 0;
+            allPreferredRate = successRates?.allPreferredRate || 0;
+            popularCombinations = popCombos || [];
         } catch (e) {
             // Fallback to 0
         }
@@ -335,9 +303,8 @@ function getStats() {
             avgMs,
             minMs: stats.timing.minMs === Infinity ? 0 : stats.timing.minMs,
             maxMs: stats.timing.maxMs,
-            recentHistory: stats.timing.history.slice(-20) // Last 20 for charts
-        },
-        errors: stats.errors
+            recentHistory: stats.timing.history.slice(-20)
+        }
     };
 }
 
@@ -384,11 +351,9 @@ function resetStats() {
     stats.subtitles = { total: 0, bySource: {}, byLanguage: {} };
     stats.languageMatching = { totalRequests: 0, found: 0, notFound: 0, byLanguageSuccess: {} };
     stats.timing = { totalMs: 0, count: 0, minMs: Infinity, maxMs: 0, history: [] };
-    stats.errors = { total: 0, recent: [] };
 }
 
 module.exports = {
     trackRequest,
-    trackError,
     getStats
 };

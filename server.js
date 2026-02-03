@@ -27,16 +27,12 @@ if (process.env.ENABLE_CACHE !== 'false') {
 // Local URL for internal proxy calls (always localhost)
 const LOCAL_BASE_URL = `http://127.0.0.1:${PORT}`;
 
-// Public URL for external access (can be overridden via env)
 const PUBLIC_BASE_URL = process.env.SUBSENSE_BASE_URL || LOCAL_BASE_URL;
 
-// Serve static files from public folder
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Parse JSON body for POST requests
 app.use(express.json());
 
-// Import crypto utilities for config encryption (graceful failure if not configured)
 let encryptConfig, decryptConfig, isEncryptionConfigured;
 try {
     const crypto = require('./src/utils/crypto');
@@ -109,7 +105,6 @@ app.post('/api/subsource/validate', async (req, res) => {
             return res.status(400).json({ valid: false, error: 'API key required' });
         }
         
-        // Use SubSourceProvider's validation method
         const provider = new SubSourceProvider();
         const result = await provider.validateApiKey(apiKey);
         
@@ -120,35 +115,29 @@ app.post('/api/subsource/validate', async (req, res) => {
     }
 });
 
-// Configuration page route
 app.get('/configure', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Handle /:config/configure requests (when Stremio tries to reconfigure)
 app.get('/:config/configure', (req, res) => {
-    // Redirect to the base configure page
     res.redirect('/configure');
 });
 
-// Stats dashboard page
 app.get('/stats', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'stats.html'));
 });
 
-// Health check endpoint for Docker/Kubernetes
-app.get('/health', (req, res) => {
+app.get('/health', async (req, res) => {
     const health = {
         status: 'ok',
         uptime: process.uptime(),
         timestamp: new Date().toISOString()
     };
     
-    // Check if stats DB is accessible
     try {
         const statsDB = require('./src/cache').statsDB;
         if (statsDB) {
-            const userCount = statsDB.getActiveUsersCount(30);
+            const userCount = await statsDB.getActiveUsersCount(30);
             health.database = { status: 'connected', activeUsers30d: userCount };
         } else {
             health.database = { status: 'not initialized' };
@@ -162,26 +151,21 @@ app.get('/health', (req, res) => {
     res.status(statusCode).json(health);
 });
 
-// Stats JSON API endpoint
-app.get('/stats/json', (req, res) => {
-    res.json(statsService.getStats());
+app.get('/stats/json', async (req, res) => {
+    res.json(await statsService.getStats());
 });
 
-// Version API endpoint (for dynamic version display in UI)
 app.get('/api/version', (req, res) => {
     const packageJson = require('./package.json');
     res.json({ version: packageJson.version });
 });
 
-// Languages API endpoint (for dynamic language list in configuration UI)
 app.get('/api/languages', (req, res) => {
     const { getSupportedLanguages, LANGUAGE_TABLE, SPECIAL_CODE_MAPPINGS, getByAnyCode } = require('./src/languages');
     
-    // Support different formats via query param
     const format = req.query.format || 'simple';
     
     if (format === 'full') {
-        // Return complete language table with all codes
         res.json(LANGUAGE_TABLE.map(lang => ({
             alpha2: lang.alpha2,
             alpha3B: lang.alpha3B,
@@ -206,9 +190,6 @@ app.get('/api/languages', (req, res) => {
         });
         res.json(lookup);
     } else {
-        // Simple format for configure.js dropdown (code + name)
-        // Use alpha2 as the unique identifier since alpha3B can be duplicated
-        // (e.g., Portuguese and Portuguese Brazil both have alpha3B='por')
         res.json(LANGUAGE_TABLE.map(lang => ({
             code: lang.alpha2,  // Use alpha2 for unique identification (pt vs pt-BR)
             name: lang.name
@@ -220,7 +201,6 @@ app.get('/api/languages', (req, res) => {
 // Stats API Endpoints
 // =====================================================
 
-// Load cache modules for stats endpoints
 let statsDB = null;
 try {
     const cache = require('./src/cache');
@@ -229,19 +209,18 @@ try {
     log('warn', `Stats API: cache module not available: ${error.message}`);
 }
 
-// Load validators
 const validators = require('./src/utils/validators');
 
 /**
  * Cache statistics API
  * Returns: cache entries, hit rate, size, etc.
  */
-app.get('/api/stats/cache', (req, res) => {
+app.get('/api/stats/cache', async (req, res) => {
     try {
         if (!statsDB) {
             return res.status(503).json({ error: 'Cache system not available' });
         }
-        const cacheStats = statsDB.getCacheStats();
+        const cacheStats = await statsDB.getCacheStats();
         res.json(cacheStats);
     } catch (error) {
         log('error', `API /stats/cache error: ${error.message}`);
@@ -253,13 +232,13 @@ app.get('/api/stats/cache', (req, res) => {
  * Provider statistics API
  * Returns: per-provider performance metrics
  */
-app.get('/api/stats/providers', (req, res) => {
+app.get('/api/stats/providers', async (req, res) => {
     try {
         if (!statsDB) {
             return res.status(503).json({ error: 'Cache system not available' });
         }
         const days = Math.min(90, Math.max(1, parseInt(req.query.days, 10) || 7));
-        const providerStats = statsDB.getProviderStats(days);
+        const providerStats = await statsDB.getProviderStats(days);
         res.json(providerStats);
     } catch (error) {
         log('error', `API /stats/providers error: ${error.message}`);
@@ -271,13 +250,13 @@ app.get('/api/stats/providers', (req, res) => {
  * Language statistics API
  * Returns: per-language availability metrics
  */
-app.get('/api/stats/languages', (req, res) => {
+app.get('/api/stats/languages', async (req, res) => {
     try {
         if (!statsDB) {
             return res.status(503).json({ error: 'Cache system not available' });
         }
         const days = Math.min(90, Math.max(1, parseInt(req.query.days, 10) || 7));
-        const languageStats = statsDB.getLanguageStats(days);
+        const languageStats = await statsDB.getLanguageStats(days);
         res.json(languageStats);
     } catch (error) {
         log('error', `API /stats/languages error: ${error.message}`);
@@ -289,13 +268,13 @@ app.get('/api/stats/languages', (req, res) => {
  * Daily statistics API
  * Returns: daily aggregated stats
  */
-app.get('/api/stats/daily', (req, res) => {
+app.get('/api/stats/daily', async (req, res) => {
     try {
         if (!statsDB) {
             return res.status(503).json({ error: 'Cache system not available' });
         }
         const days = Math.min(90, Math.max(1, parseInt(req.query.days, 10) || 7));
-        const dailyStats = statsDB.getDailyStats(days);
+        const dailyStats = await statsDB.getDailyStats(days);
         res.json(dailyStats);
     } catch (error) {
         log('error', `API /stats/daily error: ${error.message}`);
@@ -309,7 +288,7 @@ app.get('/api/stats/daily', (req, res) => {
  * Shows users active in each time window
  * @param days - Number of days (1, 3, 7, 14, 30, 60)
  */
-app.get('/api/stats/sessions', (req, res) => {
+app.get('/api/stats/sessions', async (req, res) => {
     try {
         if (!statsDB) {
             return res.status(503).json({ error: 'Cache system not available' });
@@ -318,10 +297,8 @@ app.get('/api/stats/sessions', (req, res) => {
         const allowedDays = [1, 3, 7, 14, 30, 60];
         const days = allowedDays.includes(requestedDays) ? requestedDays : 30;
         
-        // Get active users count for the specified period (cumulative for header)
-        const activeCount = statsDB.getActiveUsersCount(days);
+        const activeCount = await statsDB.getActiveUsersCount(days);
         
-        // Helper to format date as "Jan 3" or "Jan 3, 12:00"
         const formatDate = (date, includeTime = false) => {
             const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
             const month = months[date.getMonth()];
@@ -333,25 +310,16 @@ app.get('/api/stats/sessions', (req, res) => {
             return `${month} ${day}`;
         };
         
-        // Helper to get midnight of a date (start of day)
         const getMidnight = (date) => {
             const d = new Date(date);
             d.setHours(0, 0, 0, 0);
             return Math.floor(d.getTime() / 1000);
         };
         
-        // Breakdown for charting (point-in-time counts for each window)
-        const breakdown = {
-            days: days,
-            activeUsers: activeCount,
-            intervals: []
-        };
-        
+        const breakdown = { days: days, activeUsers: activeCount, intervals: [] };
         const now = new Date();
         
-        // Create interval data points for the chart
         if (days === 1) {
-            // For 1 day: every 2 hours windows (rolling), oldest to newest
             const windows = [];
             for (let h = 24; h > 0; h -= 2) {
                 windows.push({ start: h, end: h - 2 });
@@ -360,41 +328,34 @@ app.get('/api/stats/sessions', (req, res) => {
                 const pointDate = new Date(now.getTime() - w.start * 60 * 60 * 1000);
                 breakdown.intervals.push({
                     label: formatDate(pointDate, true),
-                    value: statsDB.getActiveUsersInWindow(w.start / 24, w.end / 24)
+                    value: await statsDB.getActiveUsersInWindow(w.start / 24, w.end / 24)
                 });
             }
         } else if (days === 3) {
-            // For 3 days: every 6 hours windows (rolling), oldest to newest
             for (let h = 72; h > 0; h -= 6) {
                 const pointDate = new Date(now.getTime() - h * 60 * 60 * 1000);
                 breakdown.intervals.push({
                     label: formatDate(pointDate, true),
-                    value: statsDB.getActiveUsersInWindow(h / 24, (h - 6) / 24)
+                    value: await statsDB.getActiveUsersInWindow(h / 24, (h - 6) / 24)
                 });
             }
         } else {
-            // For 7/14/30/60 days: use calendar days (midnight to midnight)
             const today = new Date(now);
-            today.setHours(0, 0, 0, 0); // Start of today
-            
-            // Calculate number of days to show
+            today.setHours(0, 0, 0, 0);
             const daysToShow = days;
             const nowTs = Math.floor(now.getTime() / 1000);
             
-            // Generate daily points from oldest to today
             for (let d = daysToShow - 1; d >= 0; d--) {
                 const dayStart = new Date(today.getTime() - d * 24 * 60 * 60 * 1000);
                 const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
-                
                 const startTs = getMidnight(dayStart);
                 const endTs = getMidnight(dayEnd);
-                
                 const isToday = d === 0;
                 const actualEndTs = isToday ? nowTs : endTs;
                 
                 breakdown.intervals.push({
                     label: isToday ? formatDate(dayStart) + ' (today)' : formatDate(dayStart),
-                    value: statsDB.getActiveUsersOnDay(startTs, actualEndTs)
+                    value: await statsDB.getActiveUsersOnDay(startTs, actualEndTs)
                 });
             }
         }
@@ -414,19 +375,18 @@ app.get('/api/stats/sessions', (req, res) => {
  * Search cache by IMDB ID
  * @param imdb - IMDB ID (validated: tt followed by 7-8 digits)
  */
-app.get('/api/cache/search', (req, res) => {
+app.get('/api/cache/search', async (req, res) => {
     try {
         if (!statsDB) {
             return res.status(503).json({ error: 'Cache system not available' });
         }
         
-        // Validate IMDB ID
         const validation = validators.validateImdbId(req.query.imdb);
         if (!validation.valid) {
             return res.status(400).json({ error: validation.error });
         }
         
-        const result = statsDB.searchCacheByImdb(validation.value);
+        const result = await statsDB.searchCacheByImdb(validation.value);
         
         if (!result) {
             return res.status(404).json({ 
@@ -447,7 +407,7 @@ app.get('/api/cache/search', (req, res) => {
  * @param page - Page number (default: 1)
  * @param limit - Items per page (max: 100, default: 20)
  */
-app.get('/api/cache/list', (req, res) => {
+app.get('/api/cache/list', async (req, res) => {
     try {
         if (!statsDB) {
             return res.status(503).json({ error: 'Cache system not available' });
@@ -458,7 +418,7 @@ app.get('/api/cache/list', (req, res) => {
             limit: req.query.limit
         });
         
-        const result = statsDB.getContentCacheSummary(pagination);
+        const result = await statsDB.getContentCacheSummary(pagination);
         res.json(result);
     } catch (error) {
         log('error', `API /cache/list error: ${error.message}`);
@@ -487,11 +447,9 @@ app.get('/:config/manifest.json', (req, res) => {
     
     log('info', `Manifest requested: ${fullUrl}`);
     
-    // Extract UserID if present (format: userId-config)
     let userId = null;
     let configString = configParam;
     
-    // Check if first 8 chars are alphanumeric followed by hyphen
     const userIdMatch = configParam.match(/^([a-z0-9]{8})-(.+)$/i);
     if (userIdMatch) {
         userId = userIdMatch[1].toLowerCase();
@@ -502,17 +460,14 @@ app.get('/:config/manifest.json', (req, res) => {
     let config = {};
     let isEncrypted = false;
     
-    // First, try to parse as URL-encoded JSON (non-encrypted config)
     try {
         config = JSON.parse(decodeURIComponent(configString));
         log('debug', `Parsed plaintext config: ${JSON.stringify(config)}`);
     } catch (jsonErr) {
-        // If JSON parse fails, try to decrypt (encrypted config)
         if (decryptConfig && isEncryptionConfigured && isEncryptionConfigured()) {
             try {
                 config = decryptConfig(configString);
                 isEncrypted = true;
-                // Log without exposing sensitive keys
                 const safeLog = { ...config };
                 if (safeLog.subsourceApiKey) safeLog.subsourceApiKey = '[REDACTED]';
                 log('debug', `Decrypted config: ${JSON.stringify(safeLog)}`);
@@ -524,16 +479,13 @@ app.get('/:config/manifest.json', (req, res) => {
         }
     }
     
-    // Store userId in config for later use in subtitle handler
     if (userId) {
         config.userId = userId;
     }
     config._isEncrypted = isEncrypted;
     
-    // Generate manifest with dynamic description
     const manifest = generateManifest(config);
     
-    // Remove configurationRequired after valid config is provided
     const hasValidConfig = config.languages && config.languages.length > 0;
     if (hasValidConfig) {
         delete manifest.behaviorHints.configurationRequired;
@@ -544,7 +496,6 @@ app.get('/:config/manifest.json', (req, res) => {
     res.json(manifest);
 });
 
-// Base manifest (without config) - still uses SDK default
 app.get('/manifest.json', (req, res) => {
     const fullUrl = `${req.protocol}://${req.get('host')}${req.originalUrl}`;
     log('info', `Base manifest requested: ${fullUrl}`);
@@ -730,7 +681,7 @@ app.get('/api/betaseries/proxy/:subtitleId', async (req, res) => {
                 log('debug', `[BetaSeries Proxy] Extracted: ${targetEntry.entryName} (format: ${originalFormat})`);
                 const extractedContent = bufferToUtf8(targetEntry.getData());
                 
-                // If ASS file, convert to VTT (preserves styling)
+                // If ASS file, convert to VTT+SRT
                 if (originalFormat === 'ass') {
                     const result = convertSubtitle(extractedContent);
                     srtContent = result.content;
@@ -1732,6 +1683,8 @@ app.get('/:config/subtitles/:type/:id/:extra?.json', async (req, res) => {
 // Mount the Stremio addon routes (for subtitles, etc.)
 app.use(getRouter(addonInterface));
 
+const SUMMARY_UPDATE_INTERVAL = 2 * 60 * 1000; // Summary update interval (2 minutes)
+
 // Start server
 app.listen(PORT, async () => {
     log('info', `[Server] SubSense addon running at ${PUBLIC_BASE_URL}`);
@@ -1744,4 +1697,25 @@ app.listen(PORT, async () => {
     
     // Preload filename parser for faster first request
     await preloadParser();
+    
+    // Initialize summary table on startup and start periodic updates
+    if (statsDB) {
+        try {
+            const result = await statsDB.recomputeSummary();
+            log('info', `[Stats] Initial summary populated in ${result.computationTime}ms (${result.entries} entries)`);
+            
+            // Start periodic summary updates
+            setInterval(async () => {
+                try {
+                    const updateResult = await statsDB.recomputeSummary();
+                } catch (err) {
+                    log('warn', `[Stats] Summary update failed: ${err.message}`);
+                }
+            }, SUMMARY_UPDATE_INTERVAL);
+            
+            log('info', `[Stats] Summary auto-refresh enabled (${SUMMARY_UPDATE_INTERVAL / 1000}s interval)`);
+        } catch (err) {
+            log('warn', `[Stats] Initial summary failed: ${err.message}`);
+        }
+    }
 });

@@ -87,7 +87,7 @@ async function handleSubtitles(args, config) {
             let needsRefresh = false;
             
             for (const lang of wyzieLanguages) {
-                const cached = subtitleCache.get(parsed.imdbId, parsed.season, parsed.episode, lang);
+                const cached = await subtitleCache.get(parsed.imdbId, parsed.season, parsed.episode, lang);
                 if (cached && cached.subtitles.length > 0) {
                     cachedSubtitles.push(...cached.subtitles);
                     if (cached.needsRefresh) {
@@ -99,7 +99,6 @@ async function handleSubtitles(args, config) {
             }
             
             if (cachedSubtitles.length > 0) {
-                // Regenerate SubSource URLs with current user's encrypted API key
                 rawSubtitles = regenerateSubsourceUrls(cachedSubtitles, config, parsed.season, parsed.episode);
                 cacheHit = true;
                 log('info', `[Subtitles] Cache HIT: ${rawSubtitles.length} subtitles for ${wyzieLanguages.join(', ')}`);
@@ -124,24 +123,24 @@ async function handleSubtitles(args, config) {
             }
 
             if (USE_FAST_FIRST) {
-                // Multi-language fast-first strategy
                 const result = await fetchSubtitlesFastFirstMulti(parsed, wyzieLanguages, videoContext, config);
                 rawSubtitles = result.subtitles;
                 backgroundPromise = result.backgroundPromise;
                 log('info', `[Subtitles] Fast-first multi-lang: got ${rawSubtitles.length} subtitles`);
             } else {
-                // Legacy: fetch all at once
                 rawSubtitles = await fetchSubtitles(parsed, videoContext, config);
             }
 
-            // Store in cache per language
+            // Store in cache per language (fire-and-forget)
             if (subtitleCache && rawSubtitles.length > 0) {
-                cacheSubtitlesByLanguage(parsed, rawSubtitles);
+                cacheSubtitlesByLanguage(parsed, rawSubtitles).catch(err => 
+                    log('debug', `Cache write error: ${err.message}`)
+                );
             }
         }
 
-        // Prioritize by user's selected languages (all with equal priority)
-        const maxSubtitles = config.maxSubtitles || 0; // 0 means unlimited
+        // Prioritize by user's selected languages
+        const maxSubtitles = config.maxSubtitles || 0;
         const { subtitles: prioritized, languageMatch } = prioritizeSubtitlesMulti(rawSubtitles, languages, maxSubtitles);
 
         // Sort by filename similarity if a real filename was provided
@@ -164,13 +163,10 @@ async function handleSubtitles(args, config) {
             providerStats: providerManager.getStats()
         });
 
-        // Log detailed request to database
+        // Log detailed request to database (fire and forget - don't await)
         if (statsDB) {
-            // Compute per-request language success metrics
             const anyPreferredFound = languages.some(lang => languageMatch?.byLanguage?.[lang]?.found);
             const allPreferredFound = languages.every(lang => languageMatch?.byLanguage?.[lang]?.found);
-            
-            // Normalize language codes to alpha3B for consistent grouping
             const normalizedLanguages = languages.map(lang => normalizeLanguageCode(lang));
             
             statsDB.logRequest({
@@ -190,7 +186,6 @@ async function handleSubtitles(args, config) {
                 series: parsed.type === 'series' ? 1 : 0
             });
             
-            // Record language stats for each selected language (normalized to B-variant)
             for (const lang of languages) {
                 const found = languageMatch?.byLanguage?.[lang]?.found || false;
                 statsDB.recordLanguageStats({
@@ -218,7 +213,9 @@ async function handleSubtitles(args, config) {
             backgroundPromise
                 .then(backgroundSubtitles => {
                     if (backgroundSubtitles && backgroundSubtitles.length > 0) {
-                        cacheSubtitlesByLanguage(parsed, backgroundSubtitles);
+                        cacheSubtitlesByLanguage(parsed, backgroundSubtitles).catch(err => 
+                            log('debug', `Cache write error: ${err.message}`)
+                        );
                     }
                 })
                 .catch(err => log('debug', `Background fetch error: ${err.message}`));
@@ -228,7 +225,6 @@ async function handleSubtitles(args, config) {
 
     } catch (error) {
         log('error', `handleSubtitles error: ${error.message}`);
-        statsService.trackError(error, { id: args.id, type: args.type });
         return { subtitles: [] };
     }
 }
@@ -420,7 +416,6 @@ async function fetchSubtitlesFastFirstMulti(parsed, languages, videoContext = {}
             
             // Cache the background results for next request
             if (subtitleCache && bgSubtitles.length > 0) {
-                // Group by language and cache
                 const byLang = {};
                 for (const sub of bgSubtitles) {
                     const lang = (sub.lang || sub.language || '').toLowerCase().substring(0, 2);
@@ -429,17 +424,17 @@ async function fetchSubtitlesFastFirstMulti(parsed, languages, videoContext = {}
                 }
                 
                 for (const [lang, subs] of Object.entries(byLang)) {
-                    const existingCache = subtitleCache.get(parsed.imdbId, parsed.season, parsed.episode, lang);
+                    const existingCache = await subtitleCache.get(parsed.imdbId, parsed.season, parsed.episode, lang);
                     if (existingCache) {
                         const existingUrls = new Set(existingCache.subtitles.map(s => s.url));
                         const newSubs = subs.filter(s => !existingUrls.has(s.url));
                         if (newSubs.length > 0) {
                             const merged = [...existingCache.subtitles, ...newSubs];
-                            subtitleCache.set(parsed.imdbId, parsed.season, parsed.episode, lang, merged);
+                            await subtitleCache.set(parsed.imdbId, parsed.season, parsed.episode, lang, merged);
                             log('debug', `[FastFirst] Background cached: ${newSubs.length} new ${lang} subs (${merged.length} total)`);
                         }
                     } else {
-                        subtitleCache.set(parsed.imdbId, parsed.season, parsed.episode, lang, subs);
+                        await subtitleCache.set(parsed.imdbId, parsed.season, parsed.episode, lang, subs);
                         log('debug', `[FastFirst] Background cached: ${subs.length} ${lang} subs`);
                     }
                 }
@@ -451,8 +446,7 @@ async function fetchSubtitlesFastFirstMulti(parsed, languages, videoContext = {}
     
     // Wrap Wyzie's background promise to cache its results
     if (wyzieBackgroundPromise) {
-        wyzieBackgroundPromise = wyzieBackgroundPromise.then(wyzieBgSubs => {
-            // Cache Wyzie's background results
+        wyzieBackgroundPromise = wyzieBackgroundPromise.then(async wyzieBgSubs => {
             if (subtitleCache && wyzieBgSubs && wyzieBgSubs.length > 0) {
                 const byLang = {};
                 for (const sub of wyzieBgSubs) {
@@ -462,17 +456,17 @@ async function fetchSubtitlesFastFirstMulti(parsed, languages, videoContext = {}
                 }
                 
                 for (const [lang, subs] of Object.entries(byLang)) {
-                    const existingCache = subtitleCache.get(parsed.imdbId, parsed.season, parsed.episode, lang);
+                    const existingCache = await subtitleCache.get(parsed.imdbId, parsed.season, parsed.episode, lang);
                     if (existingCache) {
                         const existingUrls = new Set(existingCache.subtitles.map(s => s.url));
                         const newSubs = subs.filter(s => !existingUrls.has(s.url));
                         if (newSubs.length > 0) {
                             const merged = [...existingCache.subtitles, ...newSubs];
-                            subtitleCache.set(parsed.imdbId, parsed.season, parsed.episode, lang, merged);
+                            await subtitleCache.set(parsed.imdbId, parsed.season, parsed.episode, lang, merged);
                             log('debug', `[FastFirst] Wyzie background cached: ${newSubs.length} new ${lang} subs (${merged.length} total)`);
                         }
                     } else {
-                        subtitleCache.set(parsed.imdbId, parsed.season, parsed.episode, lang, subs);
+                        await subtitleCache.set(parsed.imdbId, parsed.season, parsed.episode, lang, subs);
                     }
                 }
             }
@@ -743,7 +737,7 @@ async function refreshCacheInBackground(parsed, languages, videoContext = {}, co
         const result = await fetchSubtitlesFastFirstMulti(parsed, languages, videoContext, config);
         
         if (result.subtitles.length > 0 && subtitleCache) {
-            cacheSubtitlesByLanguage(parsed, result.subtitles);
+            await cacheSubtitlesByLanguage(parsed, result.subtitles);
         }
         
         return result.subtitles;
@@ -758,14 +752,14 @@ async function refreshCacheInBackground(parsed, languages, videoContext = {}, co
  * @param {Object} parsed - Parsed Stremio ID
  * @param {Array} subtitles - Array of subtitle objects
  */
-function cacheSubtitlesByLanguage(parsed, subtitles) {
+async function cacheSubtitlesByLanguage(parsed, subtitles) {
     if (!subtitleCache || !subtitles || subtitles.length === 0) return;
     
     // Group subtitles by language
     const byLang = {};
     for (const sub of subtitles) {
         const subLang = (sub.lang || sub.language || '').toLowerCase().substring(0, 2);
-        if (!subLang) continue; // Skip if no language
+        if (!subLang) continue;
         if (!byLang[subLang]) byLang[subLang] = [];
         byLang[subLang].push(sub);
     }
@@ -773,7 +767,7 @@ function cacheSubtitlesByLanguage(parsed, subtitles) {
     // Cache each language separately
     const languages = Object.keys(byLang);
     for (const lang of languages) {
-        subtitleCache.set(parsed.imdbId, parsed.season, parsed.episode, lang, byLang[lang]);
+        await subtitleCache.set(parsed.imdbId, parsed.season, parsed.episode, lang, byLang[lang]);
     }
     
     log('info', `[Cache] Stored ${subtitles.length} subtitles across ${languages.length} languages for ${parsed.imdbId}`);

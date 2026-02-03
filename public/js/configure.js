@@ -69,8 +69,10 @@ async function fetchLanguages() {
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
-    await fetchLanguages();
-    fetchVersion();
+    await Promise.all([
+        fetchLanguages(),
+        fetchVersion()
+    ]);
     restoreSavedLanguages();
     restoreSavedMaxSubtitles();
     initSubsourceApiKey();

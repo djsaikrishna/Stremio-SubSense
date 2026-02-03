@@ -1,32 +1,27 @@
 /**
- * SQLite Database Connection and Initialization
- * Auto-creates database and tables on first import
+ * Async SQLite Database using LibSQL
  */
-const Database = require('better-sqlite3');
+const { createClient } = require('@libsql/client');
 const path = require('path');
 const fs = require('fs');
 const { log } = require('../utils');
 
-// Database path - defaults to ./data/subsense.db
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, '../../data/subsense.db');
 
-// Ensure data directory exists
 const dataDir = path.dirname(DB_PATH);
 if (!fs.existsSync(dataDir)) {
     fs.mkdirSync(dataDir, { recursive: true });
     log('info', `[Cache] Created data directory: ${dataDir}`);
 }
 
-// Create/open database
-const db = new Database(DB_PATH);
-log('info', `[Cache] Database opened: ${DB_PATH}`);
+const client = createClient({
+    url: `file:${DB_PATH}`,
+    intMode: 'number'
+});
 
-// Enable WAL mode for better concurrent access
-db.pragma('journal_mode = WAL');
+log('info', `[Cache] LibSQL client initialized: ${DB_PATH}`);
 
-// Run schema initialization
 const schema = `
--- Subtitle cache table
 CREATE TABLE IF NOT EXISTS subtitle_cache (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     imdb_id TEXT NOT NULL,
@@ -51,14 +46,38 @@ ON subtitle_cache(imdb_id, season, episode, language);
 CREATE INDEX IF NOT EXISTS idx_cache_updated 
 ON subtitle_cache(updated_at);
 
--- Persistent statistics table
+CREATE TABLE IF NOT EXISTS cache_stats_summary (
+    id INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+    total_entries INTEGER DEFAULT 0,
+    unique_content INTEGER DEFAULT 0,
+    unique_languages INTEGER DEFAULT 0,
+    unique_sources INTEGER DEFAULT 0,
+    size_bytes INTEGER DEFAULT 0,
+    source_distribution TEXT DEFAULT '{}',
+    language_distribution TEXT DEFAULT '{}',
+    oldest_timestamp INTEGER DEFAULT 0,
+    newest_timestamp INTEGER DEFAULT 0,
+    avg_age_seconds REAL DEFAULT 0,
+    cache_hits INTEGER DEFAULT 0,
+    cache_misses INTEGER DEFAULT 0,
+    computed_at INTEGER DEFAULT (strftime('%s', 'now')),
+    computation_time_ms INTEGER DEFAULT 0
+);
+
+INSERT OR IGNORE INTO cache_stats_summary (id) VALUES (1);
+
+CREATE INDEX IF NOT EXISTS idx_cache_language 
+ON subtitle_cache(language);
+
+CREATE INDEX IF NOT EXISTS idx_cache_source 
+ON subtitle_cache(source);
+
 CREATE TABLE IF NOT EXISTS stats (
     stat_key TEXT PRIMARY KEY,
     stat_value INTEGER DEFAULT 0,
     updated_at INTEGER DEFAULT (strftime('%s', 'now'))
 );
 
--- Daily aggregated stats
 CREATE TABLE IF NOT EXISTS stats_daily (
     date TEXT NOT NULL,
     requests INTEGER DEFAULT 0,
@@ -70,7 +89,6 @@ CREATE TABLE IF NOT EXISTS stats_daily (
     PRIMARY KEY (date)
 );
 
--- Request log for analytics
 CREATE TABLE IF NOT EXISTS request_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     imdb_id TEXT NOT NULL,
@@ -87,7 +105,6 @@ CREATE TABLE IF NOT EXISTS request_log (
 CREATE INDEX IF NOT EXISTS idx_request_log_created 
 ON request_log(created_at);
 
--- Provider performance tracking
 CREATE TABLE IF NOT EXISTS provider_stats (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     provider_name TEXT NOT NULL,
@@ -103,8 +120,6 @@ CREATE TABLE IF NOT EXISTS provider_stats (
 CREATE INDEX IF NOT EXISTS idx_provider_stats_date 
 ON provider_stats(date);
 
--- Language analytics table
--- Tracks success rate of finding subtitles for each language
 CREATE TABLE IF NOT EXISTS language_stats (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     language_code TEXT NOT NULL,
@@ -119,15 +134,12 @@ CREATE TABLE IF NOT EXISTS language_stats (
 CREATE INDEX IF NOT EXISTS idx_language_stats_date 
 ON language_stats(date);
 
--- Legacy index - kept for backwards compatibility
 CREATE INDEX IF NOT EXISTS idx_language_stats_priority 
 ON language_stats(priority);
 
--- Session analytics table
--- Stores anonymized per-session statistics for usage analytics
 CREATE TABLE IF NOT EXISTS user_tracking (
     user_id TEXT PRIMARY KEY,
-    languages TEXT NOT NULL, -- JSON array of language codes
+    languages TEXT NOT NULL,
     total_requests INTEGER DEFAULT 0,
     movie_requests INTEGER DEFAULT 0,
     series_requests INTEGER DEFAULT 0,
@@ -138,8 +150,6 @@ CREATE TABLE IF NOT EXISTS user_tracking (
 CREATE INDEX IF NOT EXISTS idx_user_tracking_last_active 
 ON user_tracking(last_active);
 
--- Session content log
--- Records content requests per session for analytics
 CREATE TABLE IF NOT EXISTS user_content_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id TEXT NOT NULL,
@@ -156,25 +166,61 @@ ON user_content_log(user_id);
 
 CREATE INDEX IF NOT EXISTS idx_user_content_log_imdb 
 ON user_content_log(imdb_id);
-
--- Content cache summary view
--- For browsing cached content by IMDB ID
-CREATE VIEW IF NOT EXISTS content_cache_summary AS
-SELECT 
-    imdb_id,
-    season,
-    episode,
-    COUNT(DISTINCT language) as languages_cached,
-    COUNT(*) as total_subtitles,
-    MAX(updated_at) as last_updated,
-    GROUP_CONCAT(DISTINCT source) as sources,
-    GROUP_CONCAT(DISTINCT language) as language_list
-FROM subtitle_cache
-GROUP BY imdb_id, season, episode
-ORDER BY last_updated DESC;
 `;
 
-db.exec(schema);
-log('info', '[Cache] Database schema initialized');
+let initialized = false;
 
-module.exports = db;
+async function initializeDatabase() {
+    if (initialized) return client;
+    
+    try {
+        await client.executeMultiple(schema);
+        await client.execute("PRAGMA journal_mode = WAL");
+        initialized = true;
+        log('info', '[Cache] LibSQL database schema initialized');
+    } catch (err) {
+        if (!err.message.includes('already exists')) {
+            throw err;
+        }
+        initialized = true;
+    }
+    
+    return client;
+}
+
+async function execute(sql, args = []) {
+    await initializeDatabase();
+    return client.execute({ sql, args });
+}
+
+async function executeMultiple(sql) {
+    await initializeDatabase();
+    return client.executeMultiple(sql);
+}
+
+async function batch(statements, mode = 'write') {
+    await initializeDatabase();
+    return client.batch(statements, mode);
+}
+
+async function transaction(mode = 'write') {
+    await initializeDatabase();
+    return client.transaction(mode);
+}
+
+function close() {
+    client.close();
+    initialized = false;
+    log('info', '[Cache] LibSQL client closed');
+}
+
+module.exports = {
+    client,
+    initializeDatabase,
+    execute,
+    executeMultiple,
+    batch,
+    transaction,
+    close,
+    DB_PATH
+};

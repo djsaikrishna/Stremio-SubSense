@@ -9,7 +9,7 @@ const packageJson = require('./package.json');
  */
 function generateDescription(config = {}) {
     if (!config.languages || config.languages.length === 0) {
-        return 'Subtitle aggregator that fetches subtitles in your selected languages from multiple sources including OpenSubtitles, SubDL, Podnapisi, and more.';
+        return 'Subtitle aggregator that fetches subtitles in your selected languages from multiple sources including OpenSubtitles, SubDL, SubSource, AnimeTosho and plenty more.';
     }
     
     const languageNames = config.languages.map(code => getLanguageName(code)).filter(Boolean);

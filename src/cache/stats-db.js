@@ -1,13 +1,10 @@
 /**
- * Persistent Statistics - SQLite-backed stats storage
+ * Async Persistent Statistics - LibSQL-backed stats storage
  */
-const db = require('./database');
+const db = require('./database-libsql');
 const { log } = require('../utils');
 const { toAlpha3B } = require('../languages');
 
-/**
- * Get local date string in YYYY-MM-DD format (uses local timezone)
- */
 function getLocalDateString() {
     const now = new Date();
     const year = now.getFullYear();
@@ -16,112 +13,49 @@ function getLocalDateString() {
     return `${year}-${month}-${day}`;
 }
 
-// Prepared statements for session analytics
-const insertUserStmt = db.prepare(`
-    INSERT INTO user_tracking (user_id, languages, total_requests, movie_requests, series_requests, first_seen, last_active)
-    VALUES (?, ?, 1, ?, ?, strftime('%s', 'now'), strftime('%s', 'now'))
-    ON CONFLICT(user_id) DO UPDATE SET
-        total_requests = total_requests + 1,
-        movie_requests = movie_requests + excluded.movie_requests,
-        series_requests = series_requests + excluded.series_requests,
-        last_active = strftime('%s', 'now')
-`);
-
-const insertContentLogStmt = db.prepare(`
-    INSERT INTO user_content_log (user_id, imdb_id, content_type, season, episode, requested_at)
-    VALUES (?, ?, ?, ?, ?, strftime('%s', 'now'))
-`);
-
-const getUserStatsStmt = db.prepare(`
-    SELECT * FROM user_tracking WHERE user_id = ?
-`);
-
-const getUserContentStmt = db.prepare(`
-    SELECT * FROM user_content_log 
-    WHERE user_id = ? 
-    ORDER BY requested_at DESC 
-    LIMIT ?
-`);
-
-const getActiveUsersCountStmt = db.prepare(`
-    SELECT COUNT(*) as count FROM user_tracking 
-    WHERE last_active > strftime('%s', 'now') - ?
-`);
-
-const getActiveUsersInWindowStmt = db.prepare(`
-    SELECT COUNT(*) as count FROM user_tracking 
-    WHERE last_active <= ? AND last_active > ?
-`);
-
-const getActiveUsersOnDayStmt = db.prepare(`
-    SELECT COUNT(*) as count FROM user_tracking 
-    WHERE last_active >= ? AND last_active < ?
-`);
-
-class StatsDB {
-    /**
-     * Increment a statistic counter
-     * @param {string} key - Stat key name
-     * @param {number} amount - Amount to increment (default: 1)
-     */
-    increment(key, amount = 1) {
+class StatsDBAsync {
+    async increment(key, amount = 1) {
         try {
-            const stmt = db.prepare(`
+            await db.execute(`
                 INSERT INTO stats (stat_key, stat_value, updated_at)
                 VALUES (?, ?, strftime('%s', 'now'))
                 ON CONFLICT(stat_key) DO UPDATE SET
                     stat_value = stat_value + ?,
                     updated_at = strftime('%s', 'now')
-            `);
-            stmt.run(key, amount, amount);
+            `, [key, amount, amount]);
         } catch (error) {
             log('error', '[StatsDB] Increment error:', error.message);
         }
     }
     
-    /**
-     * Get a statistic value
-     * @param {string} key - Stat key name
-     * @returns {number} Value (0 if not found)
-     */
-    get(key) {
+    async get(key) {
         try {
-            const stmt = db.prepare('SELECT stat_value FROM stats WHERE stat_key = ?');
-            const row = stmt.get(key);
-            return row ? row.stat_value : 0;
+            const result = await db.execute('SELECT stat_value FROM stats WHERE stat_key = ?', [key]);
+            return result.rows[0]?.stat_value || 0;
         } catch (error) {
             log('error', '[StatsDB] Get error:', error.message);
             return 0;
         }
     }
     
-    /**
-     * Get all statistics
-     * @returns {Object} All stats as key-value pairs
-     */
-    getAll() {
+    async getAll() {
         try {
-            const stmt = db.prepare('SELECT stat_key, stat_value FROM stats');
-            const rows = stmt.all();
-            const result = {};
-            for (const row of rows) {
-                result[row.stat_key] = row.stat_value;
+            const result = await db.execute('SELECT stat_key, stat_value FROM stats');
+            const out = {};
+            for (const row of result.rows) {
+                out[row.stat_key] = row.stat_value;
             }
-            return result;
+            return out;
         } catch (error) {
             log('error', '[StatsDB] GetAll error:', error.message);
             return {};
         }
     }
     
-    /**
-     * Record daily stats
-     * @param {Object} data - { requests, cacheHits, cacheMisses, conversions, movies, series }
-     */
-    recordDaily(data) {
+    async recordDaily(data) {
         const today = getLocalDateString();
         try {
-            const stmt = db.prepare(`
+            await db.execute(`
                 INSERT INTO stats_daily (date, requests, cache_hits, cache_misses, conversions, movies, series)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(date) DO UPDATE SET
@@ -131,106 +65,67 @@ class StatsDB {
                     conversions = conversions + ?,
                     movies = movies + ?,
                     series = series + ?
-            `);
-            stmt.run(
+            `, [
                 today,
-                data.requests || 0,
-                data.cacheHits || 0,
-                data.cacheMisses || 0,
-                data.conversions || 0,
-                data.movies || 0,
-                data.series || 0,
-                data.requests || 0,
-                data.cacheHits || 0,
-                data.cacheMisses || 0,
-                data.conversions || 0,
-                data.movies || 0,
-                data.series || 0
-            );
+                data.requests || 0, data.cacheHits || 0, data.cacheMisses || 0,
+                data.conversions || 0, data.movies || 0, data.series || 0,
+                data.requests || 0, data.cacheHits || 0, data.cacheMisses || 0,
+                data.conversions || 0, data.movies || 0, data.series || 0
+            ]);
         } catch (error) {
             log('error', '[StatsDB] RecordDaily error:', error.message);
         }
     }
     
-    /**
-     * Get daily stats for a date range
-     * @param {number} days - Number of days to retrieve (default: 7)
-     * @returns {Array} Daily stats array
-     */
-    getDailyStats(days = 7) {
+    async getDailyStats(days = 7) {
         try {
-            const stmt = db.prepare(`
+            const result = await db.execute(`
                 SELECT * FROM stats_daily 
                 WHERE date >= date('now', '-' || ? || ' days')
                 ORDER BY date DESC
-            `);
-            return stmt.all(days);
+            `, [days]);
+            return result.rows;
         } catch (error) {
             log('error', '[StatsDB] GetDailyStats error:', error.message);
             return [];
         }
     }
     
-    /**
-     * Log a request for analytics
-     * @param {Object} data - Request data
-     */
-    logRequest(data) {
+    async logRequest(data) {
         try {
-            // Normalize to alpha3B and sort alphabetically for consistent combinations
             const normalizedLanguages = (data.languages || [])
-                .map(lang => {
-                    const normalized = toAlpha3B(lang);
-                    return normalized || lang.toLowerCase();
-                })
+                .map(lang => toAlpha3B(lang) || lang.toLowerCase())
                 .sort();
             
-            const stmt = db.prepare(`
+            await db.execute(`
                 INSERT INTO request_log 
                     (imdb_id, content_type, languages, result_count, cache_hit, response_time_ms, any_preferred_found, all_preferred_found)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            `);
-            stmt.run(
-                data.imdbId,
-                data.contentType,
-                JSON.stringify(normalizedLanguages),
-                data.resultCount || 0,
-                data.cacheHit ? 1 : 0,
-                data.responseTimeMs || 0,
-                data.anyPreferredFound ? 1 : 0,
-                data.allPreferredFound ? 1 : 0
-            );
+            `, [
+                data.imdbId, data.contentType, JSON.stringify(normalizedLanguages),
+                data.resultCount || 0, data.cacheHit ? 1 : 0, data.responseTimeMs || 0,
+                data.anyPreferredFound ? 1 : 0, data.allPreferredFound ? 1 : 0
+            ]);
         } catch (error) {
             log('error', '[StatsDB] LogRequest error:', error.message);
         }
     }
     
-    /**
-     * Get recent request logs
-     * @param {number} limit - Max number of logs to return
-     * @returns {Array} Recent request logs
-     */
-    getRecentRequests(limit = 100) {
+    async getRecentRequests(limit = 100) {
         try {
-            const stmt = db.prepare(`
-                SELECT * FROM request_log 
-                ORDER BY created_at DESC 
-                LIMIT ?
-            `);
-            return stmt.all(limit);
+            const result = await db.execute(`
+                SELECT * FROM request_log ORDER BY created_at DESC LIMIT ?
+            `, [limit]);
+            return result.rows;
         } catch (error) {
             log('error', '[StatsDB] GetRecentRequests error:', error.message);
             return [];
         }
     }
     
-    /**
-     * Get cache hit rate
-     * @returns {Object} { hits, misses, rate }
-     */
-    getCacheHitRate() {
-        const hits = this.get('cache_hits');
-        const misses = this.get('cache_misses');
+    async getCacheHitRate() {
+        const hits = await this.get('cache_hits');
+        const misses = await this.get('cache_misses');
         const total = hits + misses;
         return {
             hits,
@@ -239,19 +134,10 @@ class StatsDB {
         };
     }
     
-    // =====================================================
-    // Provider Stats Methods
-    // =====================================================
-    
-    /**
-     * Record provider performance for today
-     * @param {Object} data - { providerName, success, responseMs, subtitlesCount }
-     */
-    recordProviderStats(data) {
+    async recordProviderStats(data) {
         const today = getLocalDateString();
         try {
-            // First, try to update existing row
-            const updateStmt = db.prepare(`
+            const updateResult = await db.execute(`
                 UPDATE provider_stats SET
                     total_requests = total_requests + 1,
                     successful_requests = successful_requests + ?,
@@ -259,45 +145,31 @@ class StatsDB {
                     avg_response_ms = (avg_response_ms * total_requests + ?) / (total_requests + 1),
                     subtitles_returned = subtitles_returned + ?
                 WHERE provider_name = ? AND date = ?
-            `);
+            `, [
+                data.success ? 1 : 0, data.success ? 0 : 1,
+                data.responseMs || 0, data.subtitlesCount || 0,
+                data.providerName, today
+            ]);
             
-            const result = updateStmt.run(
-                data.success ? 1 : 0,
-                data.success ? 0 : 1,
-                data.responseMs || 0,
-                data.subtitlesCount || 0,
-                data.providerName,
-                today
-            );
-            
-            if (result.changes === 0) {
-                const insertStmt = db.prepare(`
+            if (updateResult.rowsAffected === 0) {
+                await db.execute(`
                     INSERT INTO provider_stats 
                         (provider_name, date, total_requests, successful_requests, failed_requests, avg_response_ms, subtitles_returned)
                     VALUES (?, ?, 1, ?, ?, ?, ?)
-                `);
-                insertStmt.run(
-                    data.providerName,
-                    today,
-                    data.success ? 1 : 0,
-                    data.success ? 0 : 1,
-                    data.responseMs || 0,
-                    data.subtitlesCount || 0
-                );
+                `, [
+                    data.providerName, today,
+                    data.success ? 1 : 0, data.success ? 0 : 1,
+                    data.responseMs || 0, data.subtitlesCount || 0
+                ]);
             }
         } catch (error) {
             log('error', '[StatsDB] RecordProviderStats error:', error.message);
         }
     }
     
-    /**
-     * Get provider stats summary
-     * @param {number} days - Number of days to aggregate (default: 7)
-     * @returns {Array} Provider stats
-     */
-    getProviderStats(days = 7) {
+    async getProviderStats(days = 7) {
         try {
-            const stmt = db.prepare(`
+            const result = await db.execute(`
                 SELECT 
                     provider_name,
                     SUM(total_requests) as total_requests,
@@ -310,55 +182,37 @@ class StatsDB {
                 WHERE date >= date('now', '-' || ? || ' days')
                 GROUP BY provider_name
                 ORDER BY total_requests DESC
-            `);
-            return stmt.all(days);
+            `, [days]);
+            return result.rows;
         } catch (error) {
             log('error', '[StatsDB] GetProviderStats error:', error.message);
             return [];
         }
     }
     
-    // =====================================================
-    // Language Stats Methods
-    // =====================================================
-    
-    /**
-     * Record language request/availability
-     * All languages are treated with equal priority ('preferred')
-     * @param {Object} data - { languageCode, found }
-     */
-    recordLanguageStats(data) {
+    async recordLanguageStats(data) {
         const today = getLocalDateString();
         try {
-            const stmt = db.prepare(`
+            await db.execute(`
                 INSERT INTO language_stats (language_code, date, priority, requests_for, found_count, not_found_count)
                 VALUES (?, ?, 'preferred', 1, ?, ?)
                 ON CONFLICT(language_code, date, priority) DO UPDATE SET
                     requests_for = requests_for + 1,
                     found_count = found_count + ?,
                     not_found_count = not_found_count + ?
-            `);
-            stmt.run(
-                data.languageCode,
-                today,
-                data.found ? 1 : 0,
-                data.found ? 0 : 1,
-                data.found ? 1 : 0,
-                data.found ? 0 : 1
-            );
+            `, [
+                data.languageCode, today,
+                data.found ? 1 : 0, data.found ? 0 : 1,
+                data.found ? 1 : 0, data.found ? 0 : 1
+            ]);
         } catch (error) {
             log('error', '[StatsDB] RecordLanguageStats error:', error.message);
         }
     }
     
-    /**
-     * Get language stats summary
-     * @param {number} days - Number of days to aggregate (default: 7)
-     * @returns {Array} Language stats
-     */
-    getLanguageStats(days = 7) {
+    async getLanguageStats(days = 7) {
         try {
-            const stmt = db.prepare(`
+            const result = await db.execute(`
                 SELECT 
                     language_code,
                     SUM(requests_for) as total_requests,
@@ -369,124 +223,91 @@ class StatsDB {
                 WHERE date >= date('now', '-' || ? || ' days')
                 GROUP BY language_code
                 ORDER BY total_requests DESC
-            `);
-            return stmt.all(days);
+            `, [days]);
+            return result.rows;
         } catch (error) {
             log('error', '[StatsDB] GetLanguageStats error:', error.message);
             return [];
         }
     }
     
-    /**
-     * Get aggregated language match stats
-     * @param {number} days - Number of days to aggregate
-     * @returns {Object} { totalRequests, found, notFound, successRate, perLanguage }
-     */
-    getLanguageMatchSummary(days = 30) {
+    async getLanguageMatchSummary(days = 30) {
         try {
-            const aggregateStmt = db.prepare(`
-                SELECT 
-                    SUM(found_count) as found,
-                    SUM(not_found_count) as not_found,
-                    SUM(requests_for) as total_requests
-                FROM language_stats 
-                WHERE date >= date('now', '-' || ? || ' days')
-            `);
-            const aggregate = aggregateStmt.get(days);
+            const [aggregateResult, perLangResult] = await Promise.all([
+                db.execute(`
+                    SELECT 
+                        SUM(found_count) as found,
+                        SUM(not_found_count) as not_found,
+                        SUM(requests_for) as total_requests
+                    FROM language_stats 
+                    WHERE date >= date('now', '-' || ? || ' days')
+                `, [days]),
+                db.execute(`
+                    SELECT 
+                        language_code,
+                        SUM(found_count) as found,
+                        SUM(not_found_count) as not_found,
+                        SUM(requests_for) as total_requests,
+                        ROUND(SUM(found_count) * 100.0 / NULLIF(SUM(requests_for), 0), 1) as success_rate
+                    FROM language_stats 
+                    WHERE date >= date('now', '-' || ? || ' days')
+                    GROUP BY language_code
+                    ORDER BY total_requests DESC
+                `, [days])
+            ]);
             
-            const perLangStmt = db.prepare(`
-                SELECT 
-                    language_code,
-                    SUM(found_count) as found,
-                    SUM(not_found_count) as not_found,
-                    SUM(requests_for) as total_requests,
-                    ROUND(SUM(found_count) * 100.0 / NULLIF(SUM(requests_for), 0), 1) as success_rate
-                FROM language_stats 
-                WHERE date >= date('now', '-' || ? || ' days')
-                GROUP BY language_code
-                ORDER BY total_requests DESC
-            `);
-            const perLanguage = perLangStmt.all(days);
-            
+            const aggregate = aggregateResult.rows[0];
             const totalRequests = aggregate?.total_requests || 0;
             const found = aggregate?.found || 0;
             const notFound = aggregate?.not_found || 0;
-            const successRate = totalRequests > 0 ? Math.round((found / totalRequests) * 100) : 0;
             
             return { 
-                totalRequests, 
-                found, 
-                notFound, 
-                successRate,
-                perLanguage
+                totalRequests, found, notFound,
+                successRate: totalRequests > 0 ? Math.round((found / totalRequests) * 100) : 0,
+                perLanguage: perLangResult.rows
             };
         } catch (error) {
             log('error', '[StatsDB] GetLanguageMatchSummary error:', error.message);
-            return { 
-                totalRequests: 0,
-                found: 0,
-                notFound: 0,
-                successRate: 0,
-                perLanguage: []
-            };
+            return { totalRequests: 0, found: 0, notFound: 0, successRate: 0, perLanguage: [] };
         }
     }
     
-    /**
-     * Get top successful languages
-     * @param {number} days - Number of days
-     * @param {number} limit - Number of languages to return
-     * @returns {Object} Map of language code to count
-     */
-    getTopSuccessfulLanguages(days = 30, limit = 10) {
+    async getTopSuccessfulLanguages(days = 30, limit = 10) {
         try {
-            const stmt = db.prepare(`
-                SELECT 
-                    language_code,
-                    SUM(found_count) as found_count
+            const result = await db.execute(`
+                SELECT language_code, SUM(found_count) as found_count
                 FROM language_stats 
-                WHERE date >= date('now', '-' || ? || ' days')
-                  AND found_count > 0
+                WHERE date >= date('now', '-' || ? || ' days') AND found_count > 0
                 GROUP BY language_code
-                ORDER BY found_count DESC
-                LIMIT ?
-            `);
-            const rows = stmt.all(days, limit);
-            const result = {};
-            rows.forEach(row => {
-                result[row.language_code.toUpperCase()] = row.found_count;
-            });
-            return result;
+                ORDER BY found_count DESC LIMIT ?
+            `, [days, limit]);
+            
+            const out = {};
+            result.rows.forEach(r => { out[r.language_code.toUpperCase()] = r.found_count; });
+            return out;
         } catch (error) {
             log('error', '[StatsDB] GetTopSuccessfulLanguages error:', error.message);
             return {};
         }
     }
     
-    /**
-     * Get language matching success rates (any/all preferred)
-     * @param {number} days - Number of days to look back
-     * @returns {Object} { anyPreferredRate, allPreferredRate, totalRequests }
-     */
-    getLanguageSuccessRates(days = 30) {
+    async getLanguageSuccessRates(days = 30) {
         try {
-            const stmt = db.prepare(`
+            const result = await db.execute(`
                 SELECT 
                     COUNT(*) as total_requests,
                     SUM(CASE WHEN any_preferred_found = 1 THEN 1 ELSE 0 END) as any_found,
                     SUM(CASE WHEN all_preferred_found = 1 THEN 1 ELSE 0 END) as all_found
                 FROM request_log 
                 WHERE created_at >= strftime('%s', 'now', '-' || ? || ' days')
-            `);
-            const result = stmt.get(days);
-            const totalRequests = result?.total_requests || 0;
-            const anyFound = result?.any_found || 0;
-            const allFound = result?.all_found || 0;
+            `, [days]);
             
+            const row = result.rows[0];
+            const totalRequests = row?.total_requests || 0;
             return {
                 totalRequests,
-                anyPreferredRate: totalRequests > 0 ? Math.round((anyFound / totalRequests) * 100) : 0,
-                allPreferredRate: totalRequests > 0 ? Math.round((allFound / totalRequests) * 100) : 0
+                anyPreferredRate: totalRequests > 0 ? Math.round((row.any_found || 0) / totalRequests * 100) : 0,
+                allPreferredRate: totalRequests > 0 ? Math.round((row.all_found || 0) / totalRequests * 100) : 0
             };
         } catch (error) {
             log('error', '[StatsDB] GetLanguageSuccessRates error:', error.message);
@@ -494,46 +315,23 @@ class StatsDB {
         }
     }
     
-    /**
-     * Get most popular language combinations
-     * @param {number} days - Number of days to look back
-     * @param {number} limit - Max combinations to return
-     * @returns {Array} [{ languages: 'ENG, FRE', count: 123 }, ...]
-     */
-    getPopularLanguageCombinations(days = 30, limit = 10) {
+    async getPopularLanguageCombinations(days = 30, limit = 10) {
         try {
-            const stmt = db.prepare(`
-                SELECT 
-                    languages,
-                    COUNT(*) as count
+            const result = await db.execute(`
+                SELECT languages, COUNT(*) as count
                 FROM request_log 
                 WHERE created_at >= strftime('%s', 'now', '-' || ? || ' days')
-                GROUP BY languages
-                ORDER BY count DESC
-            `);
-            const rows = stmt.all(days);
+                GROUP BY languages ORDER BY count DESC
+            `, [days]);
             
-            // Merge combinations that have the same languages in different orders or formats
-            // (["en","fr"], ["fr","en"], ["eng","fre"] all become "ENG, FRE")
             const combinationMap = new Map();
-            
-            for (const row of rows) {
+            for (const row of result.rows) {
                 let langList;
-                try {
-                    langList = JSON.parse(row.languages);
-                } catch {
-                    langList = [row.languages];
-                }
-                
-                // Normalize to alpha3B (3-letter ISO codes), uppercase, and sort alphabetically
+                try { langList = JSON.parse(row.languages); } catch { langList = [row.languages]; }
                 const normalizedLangs = langList
-                    .map(l => {
-                        const normalized = toAlpha3B(l);
-                        return (normalized || l).toUpperCase();
-                    })
+                    .map(l => (toAlpha3B(l) || l).toUpperCase())
                     .sort();
                 const key = normalizedLangs.join(', ');
-                
                 combinationMap.set(key, (combinationMap.get(key) || 0) + row.count);
             }
             
@@ -547,43 +345,62 @@ class StatsDB {
         }
     }
     
-    // =====================================================
-    // Cache Analytics Methods
-    // =====================================================
-    
-    /**
-     * Get comprehensive cache statistics
-     * @returns {Object} Cache stats
-     */
-    getCacheStats() {
+    async getCacheStats() {
         try {
-            // Basic counts
-            const counts = db.prepare(`
-                SELECT 
-                    COUNT(*) as total_entries,
-                    COUNT(DISTINCT imdb_id) as unique_content,
-                    COUNT(DISTINCT language) as unique_languages,
-                    COUNT(DISTINCT source) as unique_sources
-                FROM subtitle_cache
-            `).get();
+            const result = await db.execute('SELECT * FROM cache_stats_summary WHERE id = 1');
+            const summary = result.rows[0];
             
-            // Database size
-            const sizeInfo = db.prepare(`
-                SELECT page_count * page_size as size_bytes 
-                FROM pragma_page_count(), pragma_page_size()
-            `).get();
+            if (summary && summary.total_entries > 0) {
+                const nowSeconds = Math.floor(Date.now() / 1000);
+                return {
+                    entries: summary.total_entries,
+                    uniqueContent: summary.unique_content,
+                    uniqueLanguages: summary.unique_languages,
+                    uniqueSources: summary.unique_sources,
+                    sizeMB: summary.size_bytes ? (summary.size_bytes / 1024 / 1024).toFixed(2) : '0',
+                    oldestAge: summary.oldest_timestamp ? Math.floor(nowSeconds - summary.oldest_timestamp) : 0,
+                    newestAge: summary.newest_timestamp ? Math.floor(nowSeconds - summary.newest_timestamp) : 0,
+                    avgAgeHours: summary.avg_age_seconds ? Math.round(summary.avg_age_seconds / 3600) : 0,
+                    hitRate: (summary.cache_hits + summary.cache_misses) > 0 
+                        ? ((summary.cache_hits / (summary.cache_hits + summary.cache_misses)) * 100).toFixed(1) : 0,
+                    hits: summary.cache_hits,
+                    misses: summary.cache_misses,
+                    sourceDistribution: JSON.parse(summary.source_distribution || '{}'),
+                    languageDistribution: JSON.parse(summary.language_distribution || '{}'),
+                    lastUpdated: new Date(summary.computed_at * 1000).toISOString(),
+                    lastComputationTimeMs: summary.computation_time_ms,
+                    fromSummary: true
+                };
+            }
             
-            // Age stats
-            const ageStats = db.prepare(`
-                SELECT 
-                    MIN(updated_at) as oldest_timestamp,
-                    MAX(updated_at) as newest_timestamp,
-                    AVG(strftime('%s', 'now') - updated_at) as avg_age_seconds
-                FROM subtitle_cache
-            `).get();
+            log('warn', '[StatsDB] Summary empty, falling back to direct query');
+            return await this._getCacheStatsDirectQuery();
+        } catch (error) {
+            log('error', '[StatsDB] GetCacheStats error:', error.message);
+            return this._getDefaultCacheStats();
+        }
+    }
+    
+    async _getCacheStatsDirectQuery() {
+        try {
+            const [countsResult, sizeResult, ageResult] = await Promise.all([
+                db.execute(`
+                    SELECT COUNT(*) as total_entries, COUNT(DISTINCT imdb_id) as unique_content,
+                           COUNT(DISTINCT language) as unique_languages, COUNT(DISTINCT source) as unique_sources
+                    FROM subtitle_cache
+                `),
+                db.execute('SELECT page_count * page_size as size_bytes FROM pragma_page_count(), pragma_page_size()'),
+                db.execute(`
+                    SELECT MIN(updated_at) as oldest_timestamp, MAX(updated_at) as newest_timestamp,
+                           AVG(strftime('%s', 'now') - updated_at) as avg_age_seconds
+                    FROM subtitle_cache
+                `)
+            ]);
             
-            // Cache hit rate
-            const hitRate = this.getCacheHitRate();
+            const counts = countsResult.rows[0];
+            const sizeInfo = sizeResult.rows[0];
+            const ageStats = ageResult.rows[0];
+            const hitRate = await this.getCacheHitRate();
             
             return {
                 entries: counts.total_entries,
@@ -591,108 +408,148 @@ class StatsDB {
                 uniqueLanguages: counts.unique_languages,
                 uniqueSources: counts.unique_sources,
                 sizeMB: sizeInfo ? (sizeInfo.size_bytes / 1024 / 1024).toFixed(2) : '0',
-                oldestAge: ageStats.oldest_timestamp 
-                    ? Math.floor((Date.now() / 1000) - ageStats.oldest_timestamp)
-                    : 0,
-                newestAge: ageStats.newest_timestamp
-                    ? Math.floor((Date.now() / 1000) - ageStats.newest_timestamp)
-                    : 0,
-                avgAgeHours: ageStats.avg_age_seconds
-                    ? Math.round(ageStats.avg_age_seconds / 3600)
-                    : 0,
+                oldestAge: ageStats.oldest_timestamp ? Math.floor((Date.now() / 1000) - ageStats.oldest_timestamp) : 0,
+                newestAge: ageStats.newest_timestamp ? Math.floor((Date.now() / 1000) - ageStats.newest_timestamp) : 0,
+                avgAgeHours: ageStats.avg_age_seconds ? Math.round(ageStats.avg_age_seconds / 3600) : 0,
                 hitRate: hitRate.rate,
                 hits: hitRate.hits,
-                misses: hitRate.misses
+                misses: hitRate.misses,
+                fromSummary: false
             };
         } catch (error) {
-            log('error', '[StatsDB] GetCacheStats error:', error.message);
-            return {
-                entries: 0,
-                uniqueContent: 0,
-                uniqueLanguages: 0,
-                uniqueSources: 0,
-                sizeMB: '0',
-                oldestAge: 0,
-                newestAge: 0,
-                avgAgeHours: 0,
-                hitRate: 0,
-                hits: 0,
-                misses: 0
-            };
+            log('error', '[StatsDB] _getCacheStatsDirectQuery error:', error.message);
+            return this._getDefaultCacheStats();
         }
     }
     
-    /**
-     * Get content cache summary (for browsing)
-     * @param {Object} options - { page, limit }
-     * @returns {Object} { items, total, page, limit }
-     */
-    getContentCacheSummary(options = {}) {
+    _getDefaultCacheStats() {
+        return {
+            entries: 0, uniqueContent: 0, uniqueLanguages: 0, uniqueSources: 0,
+            sizeMB: '0', oldestAge: 0, newestAge: 0, avgAgeHours: 0,
+            hitRate: 0, hits: 0, misses: 0, fromSummary: false
+        };
+    }
+    
+    async recomputeSummary() {
+        const startTime = Date.now();
+        try {
+            const [lastSummary, currentMax] = await Promise.all([
+                db.execute('SELECT newest_timestamp, total_entries FROM cache_stats_summary WHERE id = 1'),
+                db.execute('SELECT MAX(updated_at) as max_ts, COUNT(*) as cnt FROM subtitle_cache')
+            ]);
+            
+            const lastNewest = lastSummary.rows[0]?.newest_timestamp || 0;
+            const lastCount = lastSummary.rows[0]?.total_entries || 0;
+            const currentNewest = currentMax.rows[0]?.max_ts || 0;
+            const currentCount = currentMax.rows[0]?.cnt || 0;
+            
+            if (lastNewest === currentNewest && lastCount === currentCount && lastCount > 0) {
+                log('debug', '[StatsDB] Summary unchanged, skipping recomputation');
+                return { success: true, skipped: true, computationTime: Date.now() - startTime, entries: currentCount };
+            }
+            
+            const combinedResult = await db.execute(`
+                SELECT 
+                    COUNT(*) as total_entries,
+                    COUNT(DISTINCT imdb_id) as unique_content,
+                    COUNT(DISTINCT language) as unique_languages,
+                    COUNT(DISTINCT source) as unique_sources,
+                    MIN(updated_at) as oldest_timestamp,
+                    MAX(updated_at) as newest_timestamp,
+                    AVG(strftime('%s', 'now') - updated_at) as avg_age_seconds
+                FROM subtitle_cache
+            `);
+            
+            const [sourceResult, langResult, sizeResult] = await Promise.all([
+                db.execute('SELECT source, COUNT(*) as count FROM subtitle_cache WHERE source IS NOT NULL GROUP BY source'),
+                db.execute('SELECT language, COUNT(*) as count FROM subtitle_cache WHERE language IS NOT NULL GROUP BY language ORDER BY count DESC'),
+                db.execute('SELECT page_count * page_size as size_bytes FROM pragma_page_count(), pragma_page_size()')
+            ]);
+            
+            const counts = combinedResult.rows[0];
+            const sourceDistribution = {};
+            sourceResult.rows.forEach(r => { if (r.source) sourceDistribution[r.source] = r.count; });
+            const languageDistribution = {};
+            langResult.rows.forEach(r => { if (r.language) languageDistribution[r.language] = r.count; });
+            const sizeInfo = sizeResult.rows[0];
+            const hitRate = await this.getCacheHitRate();
+            const computationTime = Date.now() - startTime;
+            
+            await db.execute(`
+                UPDATE cache_stats_summary SET
+                    total_entries = ?, unique_content = ?, unique_languages = ?, unique_sources = ?,
+                    size_bytes = ?, source_distribution = ?, language_distribution = ?,
+                    oldest_timestamp = ?, newest_timestamp = ?, avg_age_seconds = ?,
+                    cache_hits = ?, cache_misses = ?, computed_at = strftime('%s', 'now'), computation_time_ms = ?
+                WHERE id = 1
+            `, [
+                counts.total_entries, counts.unique_content, counts.unique_languages, counts.unique_sources,
+                sizeInfo?.size_bytes || 0, JSON.stringify(sourceDistribution), JSON.stringify(languageDistribution),
+                counts.oldest_timestamp || 0, counts.newest_timestamp || 0, counts.avg_age_seconds || 0,
+                hitRate.hits, hitRate.misses, computationTime
+            ]);
+            
+            log('info', `[StatsDB] Summary updated in ${computationTime}ms (${counts.total_entries.toLocaleString()} entries)`);
+            return { success: true, computationTime, entries: counts.total_entries };
+        } catch (error) {
+            log('error', `[StatsDB] Summary recomputation failed: ${error.message}`);
+            return { success: false, computationTime: Date.now() - startTime, error: error.message };
+        }
+    }
+    
+    async getContentCacheSummary(options = {}) {
         const page = Math.max(1, parseInt(options.page, 10) || 1);
         const limit = Math.min(100, Math.max(1, parseInt(options.limit, 10) || 20));
         const offset = (page - 1) * limit;
         
         try {
-            const countStmt = db.prepare(`
-                SELECT COUNT(DISTINCT imdb_id || '-' || COALESCE(season, '') || '-' || COALESCE(episode, '')) as total
-                FROM subtitle_cache
-            `);
-            const total = countStmt.get().total;
+            const summaryResult = await db.execute('SELECT unique_content FROM cache_stats_summary WHERE id = 1');
+            const totalCount = summaryResult.rows[0]?.unique_content || 0;
             
-            const dataStmt = db.prepare(`
-                SELECT * FROM content_cache_summary
+            const dataResult = await db.execute(`
+                SELECT imdb_id, season, episode, 
+                       COUNT(*) as subtitle_count,
+                       MAX(updated_at) as last_updated,
+                       GROUP_CONCAT(DISTINCT language) as languages,
+                       GROUP_CONCAT(DISTINCT source) as sources
+                FROM (
+                    SELECT * FROM subtitle_cache 
+                    ORDER BY updated_at DESC 
+                    LIMIT 10000
+                )
+                GROUP BY imdb_id, COALESCE(season, ''), COALESCE(episode, '')
+                ORDER BY MAX(updated_at) DESC
                 LIMIT ? OFFSET ?
-            `);
-            const items = dataStmt.all(limit, offset);
+            `, [limit, offset]);
             
-            return { items, total, page, limit };
+            return { items: dataResult.rows, total: totalCount, page, limit };
         } catch (error) {
             log('error', '[StatsDB] GetContentCacheSummary error:', error.message);
             return { items: [], total: 0, page, limit };
         }
     }
     
-    /**
-     * Search cache by IMDB ID
-     * @param {string} imdbId - IMDB ID (validated)
-     * @returns {Object} Detailed cache info for this content
-     */
-    searchCacheByImdb(imdbId) {
+    async searchCacheByImdb(imdbId) {
         try {
-            const summaryStmt = db.prepare(`
-                SELECT 
-                    imdb_id,
-                    season,
-                    episode,
-                    language,
-                    COUNT(*) as subtitle_count,
-                    GROUP_CONCAT(DISTINCT source) as sources,
-                    MAX(updated_at) as last_updated
-                FROM subtitle_cache
-                WHERE imdb_id = ?
+            const result = await db.execute(`
+                SELECT imdb_id, season, episode, language, COUNT(*) as subtitle_count,
+                       GROUP_CONCAT(DISTINCT source) as sources, MAX(updated_at) as last_updated
+                FROM subtitle_cache WHERE imdb_id = ?
                 GROUP BY imdb_id, season, episode, language
                 ORDER BY season, episode, language
-            `);
-            const results = summaryStmt.all(imdbId);
+            `, [imdbId]);
             
-            if (results.length === 0) {
-                return null;
-            }
+            if (result.rows.length === 0) return null;
             
-            const totalSubtitles = results.reduce((sum, r) => sum + r.subtitle_count, 0);
-            const uniqueLanguages = new Set(results.map(r => r.language)).size;
+            const totalSubtitles = result.rows.reduce((sum, r) => sum + r.subtitle_count, 0);
+            const uniqueLanguages = new Set(result.rows.map(r => r.language)).size;
             const allSources = new Set();
-            results.forEach(r => {
-                if (r.sources) r.sources.split(',').forEach(s => allSources.add(s));
-            });
+            result.rows.forEach(r => { if (r.sources) r.sources.split(',').forEach(s => allSources.add(s)); });
             
             return {
-                imdbId,
-                totalSubtitles,
-                uniqueLanguages,
-                sources: [...allSources],
-                breakdown: results,
-                lastUpdated: Math.max(...results.map(r => r.last_updated))
+                imdbId, totalSubtitles, uniqueLanguages, sources: [...allSources],
+                breakdown: result.rows,
+                lastUpdated: Math.max(...result.rows.map(r => r.last_updated))
             };
         } catch (error) {
             log('error', `[StatsDB] SearchCacheByImdb error: ${error.message}`);
@@ -700,20 +557,8 @@ class StatsDB {
         }
     }
     
-    // ========================================
-    // Session Analytics Methods
-    // ========================================
-    
-    /**
-     * Record session request for analytics
-     * @param {string} userId - 8-char session identifier
-     * @param {Object} requestData - Request details
-     */
-    trackUserRequest(userId, requestData) {
-        if (!userId) {
-            return;
-        }
-        
+    async trackUserRequest(userId, requestData) {
+        if (!userId) return;
         const { imdbId, contentType, languages, season, episode } = requestData;
         
         try {
@@ -721,9 +566,20 @@ class StatsDB {
             const isSeries = contentType === 'series' ? 1 : 0;
             const languagesJson = JSON.stringify(languages || []);
             
-            insertUserStmt.run(userId, languagesJson, isMovie, isSeries);
+            await db.execute(`
+                INSERT INTO user_tracking (user_id, languages, total_requests, movie_requests, series_requests, first_seen, last_active)
+                VALUES (?, ?, 1, ?, ?, strftime('%s', 'now'), strftime('%s', 'now'))
+                ON CONFLICT(user_id) DO UPDATE SET
+                    total_requests = total_requests + 1,
+                    movie_requests = movie_requests + excluded.movie_requests,
+                    series_requests = series_requests + excluded.series_requests,
+                    last_active = strftime('%s', 'now')
+            `, [userId, languagesJson, isMovie, isSeries]);
             
-            insertContentLogStmt.run(userId, imdbId, contentType, season || null, episode || null);
+            await db.execute(`
+                INSERT INTO user_content_log (user_id, imdb_id, content_type, season, episode, requested_at)
+                VALUES (?, ?, ?, ?, ?, strftime('%s', 'now'))
+            `, [userId, imdbId, contentType, season || null, episode || null]);
             
             log('debug', `Session ${userId}: ${contentType} ${imdbId}`);
         } catch (error) {
@@ -731,14 +587,10 @@ class StatsDB {
         }
     }
     
-    /**
-     * Get stats for a specific session
-     * @param {string} userId - 8-char session identifier
-     * @returns {Object|null} Session stats or null if not found
-     */
-    getUserStats(userId) {
+    async getUserStats(userId) {
         try {
-            const user = getUserStatsStmt.get(userId);
+            const result = await db.execute('SELECT * FROM user_tracking WHERE user_id = ?', [userId]);
+            const user = result.rows[0];
             if (!user) return null;
             
             return {
@@ -756,20 +608,14 @@ class StatsDB {
         }
     }
     
-    /**
-     * Get recent content requested by a session
-     * @param {string} userId - 8-char session identifier
-     * @param {number} [limit=10] - Max number of items to return
-     * @returns {Array} Array of content requests
-     */
-    getUserContent(userId, limit = 10) {
+    async getUserContent(userId, limit = 10) {
         try {
-            const rows = getUserContentStmt.all(userId, limit);
-            return rows.map(row => ({
-                imdbId: row.imdb_id,
-                contentType: row.content_type,
-                season: row.season,
-                episode: row.episode,
+            const result = await db.execute(`
+                SELECT * FROM user_content_log WHERE user_id = ? ORDER BY requested_at DESC LIMIT ?
+            `, [userId, limit]);
+            return result.rows.map(row => ({
+                imdbId: row.imdb_id, contentType: row.content_type,
+                season: row.season, episode: row.episode,
                 requestedAt: new Date(row.requested_at * 1000)
             }));
         } catch (error) {
@@ -778,78 +624,64 @@ class StatsDB {
         }
     }
     
-    /**
-     * Get count of active sessions in the last N days
-     * @param {number} [days=30] - Number of days to consider
-     * @returns {number} Count of active sessions
-     */
-    getActiveUsersCount(days = 30) {
+    async getActiveUsersCount(days = 30) {
         try {
             const seconds = days * 24 * 60 * 60;
-            const result = getActiveUsersCountStmt.get(seconds);
-            return result?.count || 0;
+            const result = await db.execute(
+                'SELECT COUNT(*) as count FROM user_tracking WHERE last_active > strftime(\'%s\', \'now\') - ?',
+                [seconds]
+            );
+            return result.rows[0]?.count || 0;
         } catch (error) {
             log('error', `Failed to get active sessions count: ${error.message}`);
             return 0;
         }
     }
     
-    /**
-     * Get count of users active within a specific time window
-     * @param {number} startDaysAgo - Start of window (days ago from now)
-     * @param {number} endDaysAgo - End of window (days ago from now)
-     * @returns {number} Count of users active in that window
-     */
-    getActiveUsersInWindow(startDaysAgo, endDaysAgo) {
+    async getActiveUsersInWindow(startDaysAgo, endDaysAgo) {
         try {
             const nowSeconds = Math.floor(Date.now() / 1000);
             const windowStart = nowSeconds - (startDaysAgo * 24 * 60 * 60);
             const windowEnd = nowSeconds - (endDaysAgo * 24 * 60 * 60);
-            const result = getActiveUsersInWindowStmt.get(windowEnd, windowStart);
-            return result?.count || 0;
+            const result = await db.execute(
+                'SELECT COUNT(*) as count FROM user_tracking WHERE last_active <= ? AND last_active > ?',
+                [windowEnd, windowStart]
+            );
+            return result.rows[0]?.count || 0;
         } catch (error) {
             log('error', `Failed to get active users in window: ${error.message}`);
             return 0;
         }
     }
     
-    /**
-     * Get count of users active on a specific calendar day (midnight to midnight)
-     * @param {number} startTimestamp - Start of day (midnight) in Unix seconds
-     * @param {number} endTimestamp - End of day (next midnight) in Unix seconds
-     * @returns {number} Count of users active on that day
-     */
-    getActiveUsersOnDay(startTimestamp, endTimestamp) {
+    async getActiveUsersOnDay(startTimestamp, endTimestamp) {
         try {
-            const result = getActiveUsersOnDayStmt.get(startTimestamp, endTimestamp);
-            return result?.count || 0;
+            const result = await db.execute(
+                'SELECT COUNT(*) as count FROM user_tracking WHERE last_active >= ? AND last_active < ?',
+                [startTimestamp, endTimestamp]
+            );
+            return result.rows[0]?.count || 0;
         } catch (error) {
             log('error', `Failed to get active users on day: ${error.message}`);
             return 0;
         }
     }
     
-    /**
-     * Get aggregate session statistics
-     * @returns {Object} Aggregate stats
-     */
-    getAggregateUserStats() {
+    async getAggregateUserStats() {
         try {
-            const stats = db.prepare(`
-                SELECT 
-                    COUNT(*) as total_users,
-                    SUM(total_requests) as total_requests,
-                    SUM(movie_requests) as movie_requests,
-                    SUM(series_requests) as series_requests,
-                    AVG(total_requests) as avg_requests_per_user
+            const result = await db.execute(`
+                SELECT COUNT(*) as total_users, SUM(total_requests) as total_requests,
+                       SUM(movie_requests) as movie_requests, SUM(series_requests) as series_requests,
+                       AVG(total_requests) as avg_requests_per_user
                 FROM user_tracking
-            `).get();
+            `);
+            const stats = result.rows[0];
             
-            const activeSessions = {
-                last7Days: this.getActiveUsersCount(7),
-                last30Days: this.getActiveUsersCount(30),
-                last60Days: this.getActiveUsersCount(60)
-            };
+            const [d7, d30, d60] = await Promise.all([
+                this.getActiveUsersCount(7),
+                this.getActiveUsersCount(30),
+                this.getActiveUsersCount(60)
+            ]);
             
             return {
                 totalSessions: stats?.total_users || 0,
@@ -857,20 +689,16 @@ class StatsDB {
                 movieRequests: stats?.movie_requests || 0,
                 seriesRequests: stats?.series_requests || 0,
                 avgRequestsPerSession: Math.round(stats?.avg_requests_per_user || 0),
-                activeSessions
+                activeSessions: { last7Days: d7, last30Days: d30, last60Days: d60 }
             };
         } catch (error) {
             log('error', `Failed to get aggregate session stats: ${error.message}`);
             return {
-                totalSessions: 0,
-                totalRequests: 0,
-                movieRequests: 0,
-                seriesRequests: 0,
-                avgRequestsPerSession: 0,
-                activeSessions: { last7Days: 0, last30Days: 0, last60Days: 0 }
+                totalSessions: 0, totalRequests: 0, movieRequests: 0, seriesRequests: 0,
+                avgRequestsPerSession: 0, activeSessions: { last7Days: 0, last30Days: 0, last60Days: 0 }
             };
         }
     }
 }
 
-module.exports = new StatsDB();
+module.exports = new StatsDBAsync();
