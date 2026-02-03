@@ -876,24 +876,40 @@ label {
 /* ===== Charts & Stats ===== */
 .stats-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
     gap: 16px;
     margin-bottom: 24px;
 }
 
-/* Explicit Grid for Overview */
+/* Explicit Grid for Overview - use auto-fit for better responsiveness */
 .stats-grid.grid-6 {
-    grid-template-columns: repeat(6, 1fr);
+    grid-template-columns: repeat(6, minmax(130px, 1fr));
 }
 
-@media (max-width: 1024px) {
+.stats-grid.grid-5 {
+    grid-template-columns: repeat(5, minmax(140px, 1fr));
+}
+
+.stats-grid.grid-4 {
+    grid-template-columns: repeat(4, minmax(150px, 1fr));
+}
+
+@media (max-width: 1100px) {
     .stats-grid.grid-6 {
         grid-template-columns: repeat(3, 1fr);
+    }
+    .stats-grid.grid-5 {
+        grid-template-columns: repeat(3, 1fr);
+    }
+    .stats-grid.grid-4 {
+        grid-template-columns: repeat(2, 1fr);
     }
 }
 
 @media (max-width: 600px) {
-    .stats-grid.grid-6 {
+    .stats-grid.grid-6,
+    .stats-grid.grid-5,
+    .stats-grid.grid-4 {
         grid-template-columns: repeat(2, 1fr);
     }
 }
@@ -902,11 +918,12 @@ label {
     background: linear-gradient(135deg, rgba(26, 34, 63, 0.9) 0%, rgba(26, 34, 63, 0.7) 100%);
     border: 1px solid var(--color-border);
     border-radius: 12px;
-    padding: 24px 20px;
+    padding: 24px 10px;
     text-align: center;
     transition: var(--transition);
     position: relative;
-    overflow: hidden;
+    overflow: visible;
+    min-width: 0;
 }
 
 .stat-card:hover {
@@ -916,19 +933,41 @@ label {
 }
 
 .stat-card .value {
-    font-size: 1.8rem;
+    font-size: 1.6rem;
     font-weight: 700;
     color: var(--color-accent-blue);
     margin-bottom: 8px;
     text-shadow: 0 0 20px rgba(74, 144, 226, 0.3);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.2;
+}
+
+/* Auto-scaling for large values */
+.stat-card .value[data-large] {
+    font-size: 1.3rem;
+}
+
+.stat-card .value[data-xlarge] {
+    font-size: 1.1rem;
 }
 
 .stat-card .label {
     color: var(--color-text-secondary);
-    font-size: 0.85rem;
+    font-size: 0.7rem;
     font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.02em;
+    letter-spacing: 0.01em;
+    line-height: 1.3;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Tooltip for stat card values - uses native browser title attribute */
+.stat-card .value[title] {
+    cursor: help;
 }
 
 /* Chart Containers */

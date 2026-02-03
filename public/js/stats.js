@@ -12,9 +12,57 @@ const REFRESH_INTERVAL_MS = 30000;
 
 let languageLookup = {};
 
+function autoScaleStatValues() {
+    document.querySelectorAll('.stat-card .value').forEach(el => {
+        const text = el.textContent || '';
+        const len = text.length;
+        
+        el.removeAttribute('data-large');
+        el.removeAttribute('data-xlarge');
+        el.removeAttribute('title');
+        
+        if (len > 6) {
+            el.setAttribute('title', text);
+        }
+        
+        if (len > 12) {
+            el.setAttribute('data-xlarge', '');
+        } else if (len > 9) {
+            el.setAttribute('data-large', '');
+        }
+    });
+}
+
+function formatCompactNumber(num, decimals = 1) {
+    if (num === null || num === undefined || isNaN(num)) return '0';
+    
+    const absNum = Math.abs(num);
+    
+    if (absNum >= 1e9) {
+        return (num / 1e9).toFixed(decimals) + 'B';
+    } else if (absNum >= 1e6) {
+        return (num / 1e6).toFixed(decimals) + 'M';
+    } else if (absNum >= 1e3) {
+        return (num / 1e3).toFixed(decimals) + 'K';
+    }
+    
+    return num.toLocaleString();
+}
+
+
+function formatDatabaseSize(sizeMB) {
+    const size = parseFloat(sizeMB) || 0;
+    
+    if (size >= 1024) {
+        const gb = (size / 1024).toFixed(2);
+        return { value: gb, unit: 'GB', full: `${size.toFixed(2)} MB` };
+    }
+    
+    return { value: size.toFixed(2), unit: 'MB', full: `${size.toFixed(2)} MB` };
+}
+
 async function loadLanguageLookup() {
-    try {        // Use the lookup format which returns a flat code-to-name object
-        // including all code formats and special provider mappings
+    try {
         const response = await fetch('/api/languages?format=lookup');
         if (response.ok) {
             languageLookup = await response.json();
@@ -95,11 +143,12 @@ const centerTextPlugin = {
         ctx.save();
         
         const total = chart.data.datasets[0].data.reduce((a, b) => a + b, 0);
+        // Use compact number format for the center text
         ctx.font = 'bold 22px Inter, sans-serif';
         ctx.fillStyle = '#E8EDF5';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText(total.toLocaleString(), centerX, centerY - 6);
+        ctx.fillText(formatCompactNumber(total), centerX, centerY - 6);
         
         ctx.font = '11px Inter, sans-serif';
         ctx.fillStyle = '#9CA8C8';
@@ -242,7 +291,15 @@ function initCharts() {
                         const total = context.dataset.data.reduce((a, b) => a + b, 0);
                         const value = context.raw;
                         const percentage = ((value / total) * 100).toFixed(1);
-                        return ` ${context.label}: ${value.toLocaleString()} (${percentage}%)`;
+                        return ` ${context.label}: ${formatCompactNumber(value)} (${percentage}%)`;
+                    },
+                    afterLabel: function(context) {
+                        const value = context.raw;
+                        // Show full number if it's large
+                        if (value >= 1000) {
+                            return `   Full: ${value.toLocaleString()}`;
+                        }
+                        return '';
                     }
                 }
             },
@@ -317,7 +374,14 @@ function initCharts() {
                     cornerRadius: 8,
                     callbacks: {
                         label: function(context) {
-                            return ` ${context.raw.toLocaleString()} subtitles`;
+                            return ` ${formatCompactNumber(context.raw)} subtitles`;
+                        },
+                        afterLabel: function(context) {
+                            const value = context.raw;
+                            if (value >= 1000) {
+                                return `   Full: ${value.toLocaleString()}`;
+                            }
+                            return '';
                         }
                     }
                 }
@@ -449,12 +513,37 @@ async function loadStats() {
 }
 
 function updateOverview(stats) {
-    document.getElementById('totalRequests').textContent = stats.requests.total.toLocaleString();
-    document.getElementById('movieRequests').textContent = stats.requests.movie.toLocaleString();
-    document.getElementById('seriesRequests').textContent = stats.requests.series.toLocaleString();
-    document.getElementById('totalSubtitles').textContent = stats.subtitles.total.toLocaleString();
+    const totalReqs = stats.requests.total;
+    const movieReqs = stats.requests.movie;
+    const seriesReqs = stats.requests.series;
+    const totalSubs = stats.subtitles.total;
+    
+    const totalReqsEl = document.getElementById('totalRequests');
+    const movieReqsEl = document.getElementById('movieRequests');
+    const seriesReqsEl = document.getElementById('seriesRequests');
+    const totalSubsEl = document.getElementById('totalSubtitles');
+    
+    if (totalReqsEl) {
+        totalReqsEl.textContent = formatCompactNumber(totalReqs);
+        totalReqsEl.title = totalReqs.toLocaleString();
+    }
+    if (movieReqsEl) {
+        movieReqsEl.textContent = formatCompactNumber(movieReqs);
+        movieReqsEl.title = movieReqs.toLocaleString();
+    }
+    if (seriesReqsEl) {
+        seriesReqsEl.textContent = formatCompactNumber(seriesReqs);
+        seriesReqsEl.title = seriesReqs.toLocaleString();
+    }
+    if (totalSubsEl) {
+        totalSubsEl.textContent = formatCompactNumber(totalSubs);
+        totalSubsEl.title = totalSubs.toLocaleString();
+    }
+    
     document.getElementById('avgFetchTime').textContent = `${stats.timing.avgMs}ms`;
     document.getElementById('uptime').textContent = stats.uptime.formatted;
+    
+    autoScaleStatValues();
 }
 
 function updateLanguageMatching(stats) {
@@ -762,13 +851,35 @@ async function loadCacheStats() {
         const missesEl = document.getElementById('cacheMisses');
         
         if (hitRateEl) hitRateEl.textContent = `${cache.hitRate}%`;
-        if (entriesEl) entriesEl.textContent = cache.entries.toLocaleString();
-        if (contentEl) contentEl.textContent = cache.uniqueContent.toLocaleString();
+        
+        if (entriesEl) {
+            entriesEl.textContent = formatCompactNumber(cache.entries);
+            entriesEl.title = cache.entries.toLocaleString();
+        }
+        if (contentEl) {
+            contentEl.textContent = formatCompactNumber(cache.uniqueContent);
+            contentEl.title = cache.uniqueContent.toLocaleString();
+        }
         if (languagesEl) languagesEl.textContent = cache.uniqueLanguages;
-        if (sizeEl) sizeEl.textContent = `${cache.sizeMB} MB`;
+        
+        if (sizeEl) {
+            const sizeInfo = formatDatabaseSize(cache.sizeMB);
+            sizeEl.innerHTML = `${sizeInfo.value}<br><small style="font-size: 0.6em; opacity: 0.7;">${sizeInfo.unit}</small>`;
+            sizeEl.title = sizeInfo.full;
+        }
+        
         if (hitBarEl) hitBarEl.style.width = `${cache.hitRate}%`;
-        if (hitsEl) hitsEl.textContent = cache.hits.toLocaleString();
-        if (missesEl) missesEl.textContent = cache.misses.toLocaleString();
+        
+        if (hitsEl) {
+            hitsEl.textContent = formatCompactNumber(cache.hits);
+            hitsEl.title = cache.hits.toLocaleString();
+        }
+        if (missesEl) {
+            missesEl.textContent = formatCompactNumber(cache.misses);
+            missesEl.title = cache.misses.toLocaleString();
+        }
+        
+        autoScaleStatValues();
         
     } catch (error) {
         console.error('Failed to load cache stats:', error);

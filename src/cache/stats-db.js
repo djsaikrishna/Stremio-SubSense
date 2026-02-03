@@ -508,9 +508,10 @@ class StatsDBAsync {
             
             const dataResult = await db.execute(`
                 SELECT imdb_id, season, episode, 
-                       COUNT(*) as subtitle_count,
+                       COUNT(*) as total_subtitles,
+                       COUNT(DISTINCT language) as languages_cached,
                        MAX(updated_at) as last_updated,
-                       GROUP_CONCAT(DISTINCT language) as languages,
+                       GROUP_CONCAT(DISTINCT language) as language_list,
                        GROUP_CONCAT(DISTINCT source) as sources
                 FROM (
                     SELECT * FROM subtitle_cache 
