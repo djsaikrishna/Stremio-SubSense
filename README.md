@@ -109,6 +109,7 @@ Access your addon at `http://localhost:3100`
 | `BETASERIES_API_KEY` | — | API key for BetaSeries provider (French subtitles) |
 | `ENABLE_CACHE` | true | Enable/disable caching |
 | `CACHE_RETENTION_DAYS` | 30 | Days before cache cleanup |
+| `STATS_REFRESH_INTERVAL` | 120000 | Stats refresh interval in milliseconds. Set to `0` to **completely disable** stats pages and API endpoints |
 
 ### Available Providers
 
@@ -137,6 +138,25 @@ Access the stats dashboard at `/stats` to view:
 - Active user sessions
 
 Browse cached content at `/stats/content`.
+
+### Disabling Stats (Resource Optimization)
+
+For large databases (millions of entries), stats refresh can consume significant CPU. To reduce resource usage:
+
+```yaml
+environment:
+  # Refresh every hour instead of every 2 minutes
+  - STATS_REFRESH_INTERVAL=3600000
+  
+  # Or completely disable stats (pages blocked, zero overhead)
+  - STATS_REFRESH_INTERVAL=0
+```
+
+When disabled (`STATS_REFRESH_INTERVAL=0`):
+- `/stats` and `/stats/content` pages show a styled "disabled" message
+- All `/api/stats/*` and `/api/cache/*` endpoints return 403 Forbidden
+- Navigation links to stats are automatically hidden in the UI
+- Zero CPU overhead from stats computation
 
 ---
 

@@ -29,6 +29,15 @@ const LOCAL_BASE_URL = `http://127.0.0.1:${PORT}`;
 
 const PUBLIC_BASE_URL = process.env.SUBSENSE_BASE_URL || LOCAL_BASE_URL;
 
+// Stats summary refresh interval (in milliseconds)
+// Default: 2 minutes. For large databases (>1M entries), consider 1-6 hours.
+// Set via STATS_REFRESH_INTERVAL env var in milliseconds (e.g., 3600000 for 1 hour)
+// Special value: 0 = disable stats completely (no refresh, pages blocked, links hidden)
+const SUMMARY_UPDATE_INTERVAL = process.env.STATS_REFRESH_INTERVAL !== undefined 
+    ? parseInt(process.env.STATS_REFRESH_INTERVAL, 10) 
+    : 2 * 60 * 1000;
+const STATS_ENABLED = SUMMARY_UPDATE_INTERVAL > 0;
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 app.use(express.json());
@@ -123,7 +132,85 @@ app.get('/:config/configure', (req, res) => {
     res.redirect('/configure');
 });
 
+const disabledPageTemplate = (title, message) => `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SubSense - ${title}</title>
+    <link rel="icon" type="image/png" href="/logo.png">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --color-dark-blue-bg: #0C1226;
+            --color-medium-blue-bg: #1A223F;
+            --color-accent-blue: #4A90E2;
+            --color-text-primary: #E8EDF5;
+            --color-text-secondary: #9CA8C8;
+            --color-error: #F44336;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Inter', system-ui, sans-serif;
+            background: linear-gradient(180deg, var(--color-dark-blue-bg) 0%, #0A0F1C 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: var(--color-text-primary);
+        }
+        body::before {
+            content: "";
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: radial-gradient(ellipse at 20% 20%, rgba(74, 144, 226, 0.08) 0%, transparent 50%),
+                        radial-gradient(ellipse at 80% 80%, rgba(74, 144, 226, 0.05) 0%, transparent 50%);
+            pointer-events: none;
+        }
+        .container {
+            text-align: center;
+            padding: 3rem;
+            background: rgba(26, 34, 63, 0.6);
+            border-radius: 16px;
+            border: 1px solid rgba(74, 144, 226, 0.2);
+            max-width: 500px;
+            position: relative;
+            z-index: 1;
+        }
+        .icon { font-size: 4rem; margin-bottom: 1.5rem; }
+        h1 { color: var(--color-error); margin-bottom: 1rem; font-size: 1.75rem; }
+        p { color: var(--color-text-secondary); margin-bottom: 1.5rem; line-height: 1.6; }
+        a {
+            display: inline-block;
+            padding: 0.75rem 1.5rem;
+            background: linear-gradient(135deg, var(--color-accent-blue) 0%, #3a7bd5 100%);
+            color: white;
+            text-decoration: none;
+            border-radius: 8px;
+            font-weight: 500;
+            transition: all 0.3s ease;
+        }
+        a:hover { transform: translateY(-2px); box-shadow: 0 4px 20px rgba(74, 144, 226, 0.4); }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="icon">🚫</div>
+        <h1>${title}</h1>
+        <p>${message}</p>
+        <a href="/configure">← Back to Configuration</a>
+    </div>
+</body>
+</html>`;
+
 app.get('/stats', (req, res) => {
+    if (!STATS_ENABLED) {
+        return res.status(403).send(disabledPageTemplate(
+            'Statistics Disabled',
+            'The administrator has disabled statistics on this instance.'
+        ));
+    }
     res.sendFile(path.join(__dirname, 'public', 'stats.html'));
 });
 
@@ -152,12 +239,26 @@ app.get('/health', async (req, res) => {
 });
 
 app.get('/stats/json', async (req, res) => {
+    if (!STATS_ENABLED) {
+        return res.status(403).json({ error: 'Statistics are disabled on this instance' });
+    }
     res.json(await statsService.getStats());
 });
 
 app.get('/api/version', (req, res) => {
     const packageJson = require('./package.json');
     res.json({ version: packageJson.version });
+});
+
+/**
+ * Configuration API
+ * Returns: public configuration flags for frontend use
+ */
+app.get('/api/config', (req, res) => {
+    res.json({
+        statsEnabled: STATS_ENABLED,
+        version: require('./package.json').version
+    });
 });
 
 app.get('/api/languages', (req, res) => {
@@ -211,11 +312,19 @@ try {
 
 const validators = require('./src/utils/validators');
 
+// Middleware to block all stats/cache API endpoints when stats are disabled
+const statsDisabledMiddleware = (req, res, next) => {
+    if (!STATS_ENABLED) {
+        return res.status(403).json({ error: 'Statistics are disabled on this instance' });
+    }
+    next();
+};
+
 /**
  * Cache statistics API
  * Returns: cache entries, hit rate, size, etc.
  */
-app.get('/api/stats/cache', async (req, res) => {
+app.get('/api/stats/cache', statsDisabledMiddleware, async (req, res) => {
     try {
         if (!statsDB) {
             return res.status(503).json({ error: 'Cache system not available' });
@@ -232,7 +341,7 @@ app.get('/api/stats/cache', async (req, res) => {
  * Provider statistics API
  * Returns: per-provider performance metrics
  */
-app.get('/api/stats/providers', async (req, res) => {
+app.get('/api/stats/providers', statsDisabledMiddleware, async (req, res) => {
     try {
         if (!statsDB) {
             return res.status(503).json({ error: 'Cache system not available' });
@@ -250,7 +359,7 @@ app.get('/api/stats/providers', async (req, res) => {
  * Language statistics API
  * Returns: per-language availability metrics
  */
-app.get('/api/stats/languages', async (req, res) => {
+app.get('/api/stats/languages', statsDisabledMiddleware, async (req, res) => {
     try {
         if (!statsDB) {
             return res.status(503).json({ error: 'Cache system not available' });
@@ -268,7 +377,7 @@ app.get('/api/stats/languages', async (req, res) => {
  * Daily statistics API
  * Returns: daily aggregated stats
  */
-app.get('/api/stats/daily', async (req, res) => {
+app.get('/api/stats/daily', statsDisabledMiddleware, async (req, res) => {
     try {
         if (!statsDB) {
             return res.status(503).json({ error: 'Cache system not available' });
@@ -288,7 +397,7 @@ app.get('/api/stats/daily', async (req, res) => {
  * Shows users active in each time window
  * @param days - Number of days (1, 3, 7, 14, 30, 60)
  */
-app.get('/api/stats/sessions', async (req, res) => {
+app.get('/api/stats/sessions', statsDisabledMiddleware, async (req, res) => {
     try {
         if (!statsDB) {
             return res.status(503).json({ error: 'Cache system not available' });
@@ -375,7 +484,7 @@ app.get('/api/stats/sessions', async (req, res) => {
  * Search cache by IMDB ID
  * @param imdb - IMDB ID (validated: tt followed by 7-8 digits)
  */
-app.get('/api/cache/search', async (req, res) => {
+app.get('/api/cache/search', statsDisabledMiddleware, async (req, res) => {
     try {
         if (!statsDB) {
             return res.status(503).json({ error: 'Cache system not available' });
@@ -407,7 +516,7 @@ app.get('/api/cache/search', async (req, res) => {
  * @param page - Page number (default: 1)
  * @param limit - Items per page (max: 100, default: 20)
  */
-app.get('/api/cache/list', async (req, res) => {
+app.get('/api/cache/list', statsDisabledMiddleware, async (req, res) => {
     try {
         if (!statsDB) {
             return res.status(503).json({ error: 'Cache system not available' });
@@ -430,6 +539,12 @@ app.get('/api/cache/list', async (req, res) => {
  * Content browser page
  */
 app.get('/stats/content', (req, res) => {
+    if (!STATS_ENABLED) {
+        return res.status(403).send(disabledPageTemplate(
+            'Cache Browser Disabled',
+            'The administrator has disabled statistics on this instance.'
+        ));
+    }
     res.sendFile(path.join(__dirname, 'public', 'content.html'));
 });
 
@@ -1683,13 +1798,15 @@ app.get('/:config/subtitles/:type/:id/:extra?.json', async (req, res) => {
 // Mount the Stremio addon routes (for subtitles, etc.)
 app.use(getRouter(addonInterface));
 
-const SUMMARY_UPDATE_INTERVAL = 2 * 60 * 1000; // Summary update interval (2 minutes)
-
 // Start server
 app.listen(PORT, async () => {
     log('info', `[Server] SubSense addon running at ${PUBLIC_BASE_URL}`);
     log('info', `[Server] Configure at ${PUBLIC_BASE_URL}/configure`);
-    log('info', `[Server] Stats at ${PUBLIC_BASE_URL}/stats`);
+    if (STATS_ENABLED) {
+        log('info', `[Server] Stats at ${PUBLIC_BASE_URL}/stats`);
+    } else {
+        log('info', `[Server] Stats are DISABLED (STATS_REFRESH_INTERVAL=0)`);
+    }
     log('info', `[Server] Manifest at ${PUBLIC_BASE_URL}/manifest.json`);
     if (PUBLIC_BASE_URL !== LOCAL_BASE_URL) {
         log('info', `[Server] Internal proxy URL: ${LOCAL_BASE_URL}`);
@@ -1698,8 +1815,8 @@ app.listen(PORT, async () => {
     // Preload filename parser for faster first request
     await preloadParser();
     
-    // Initialize summary table on startup and start periodic updates
-    if (statsDB) {
+    // Initialize summary table on startup and start periodic updates (only if stats enabled)
+    if (STATS_ENABLED && statsDB) {
         try {
             const result = await statsDB.recomputeSummary();
             log('info', `[Stats] Initial summary populated in ${result.computationTime}ms (${result.entries} entries)`);

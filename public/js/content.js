@@ -59,7 +59,7 @@ async function loadLanguageLookup() {
 
 async function fetchVersion() {
     try {
-        const response = await fetch('/api/version');
+        const response = await fetch('/api/config');
         const data = await response.json();
         const version = `v${data.version}`;
         
@@ -68,8 +68,14 @@ async function fetchVersion() {
         
         if (versionBadge) versionBadge.textContent = version;
         if (footerVersion) footerVersion.textContent = version;
+        
+        if (!data.statsEnabled) {
+            document.querySelectorAll('a[href="/stats"], a[href="/stats/content"]').forEach(el => {
+                el.style.display = 'none';
+            });
+        }
     } catch (error) {
-        console.error('Failed to fetch version:', error);
+        console.error('Failed to fetch config:', error);
     }
 }
 

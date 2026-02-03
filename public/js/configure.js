@@ -155,11 +155,25 @@ function restoreSavedLanguages() {
 
 async function fetchVersion() {
     try {
-        const response = await fetch('/api/version');
+        const response = await fetch('/api/config');
         const data = await response.json();
         versionBadge.textContent = `v${data.version}`;
+        
+        if (!data.statsEnabled) {
+            document.querySelectorAll('a[href="/stats"], a[href="/stats/content"]').forEach(el => {
+                el.style.display = 'none';
+            });
+            
+            const navLinks = document.querySelector('.nav-links');
+            if (navLinks) {
+                const visibleLinks = navLinks.querySelectorAll('a:not([style*="display: none"])');
+                if (visibleLinks.length <= 1) {
+                    navLinks.style.display = 'none';
+                }
+            }
+        }
     } catch (error) {
-        console.error('Failed to fetch version:', error);
+        console.error('Failed to fetch config:', error);
         versionBadge.textContent = 'v?.?.?';
     }
 }

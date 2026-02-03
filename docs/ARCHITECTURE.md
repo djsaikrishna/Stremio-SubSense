@@ -559,6 +559,8 @@ Located in `src/cache/cache-cleaner.js`
 
 ## 9. Statistics & Analytics
 
+> **Note:** Stats can be completely disabled by setting `STATS_REFRESH_INTERVAL=0`. See [Environment Variables](#12-environment-variables) for details.
+
 ### 9.1 In-Memory Stats (src/stats.js)
 
 Tracks real-time metrics:
@@ -713,8 +715,11 @@ Example: subsense-0-2607183-vtt-subsource
 
 ### 11.3 Stats API
 
+> **Note:** All stats endpoints except `/api/config` return 403 when `STATS_REFRESH_INTERVAL=0`.
+
 | Route | Method | Purpose |
 |-------|--------|---------|
+| `/api/config` | GET | Returns `{statsEnabled, version}` - always available |
 | `/api/version` | GET | Package version |
 | `/api/stats/cache` | GET | Cache statistics |
 | `/api/stats/providers` | GET | Provider metrics |
@@ -749,6 +754,32 @@ Example: subsense-0-2607183-vtt-subsource
 | `DB_PATH` | ./data/subsense.db | SQLite database path |
 | `CACHE_RETENTION_DAYS` | 30 | Days before cache cleanup |
 | `MAX_SUBTITLES` | 30 | Fallback max (overridden by user config) |
+| `STATS_REFRESH_INTERVAL` | 120000 | Stats refresh interval in milliseconds. Set to `0` to disable stats entirely |
+
+### 12.1 Stats Configuration
+
+The stats system can be configured via `STATS_REFRESH_INTERVAL`:
+
+| Value | Behavior |
+|-------|----------|
+| `120000` (default) | Refresh stats every 2 minutes |
+| `3600000` | Refresh stats every hour |
+| `0` | **Completely disable** stats (pages blocked, zero CPU overhead) |
+
+**When `STATS_REFRESH_INTERVAL=0`:**
+- `/stats` and `/stats/content` pages return styled 403 pages
+- All `/api/stats/*` and `/api/cache/*` endpoints return 403 Forbidden
+- `/api/config` returns `{statsEnabled: false, version: "x.x.x"}`
+- Navigation links to stats are hidden in frontend UI
+- No background stats computation (zero CPU overhead)
+
+**Recommended settings by database size:**
+| Database Size | Recommended Interval |
+|---------------|---------------------|
+| < 100K entries | 120000 (2 min) |
+| 100K - 1M entries | 300000 (5 min) |
+| 1M - 10M entries | 600000 (10 min) |
+| > 10M entries | 3600000 (1 hour) or 0 (disabled) |
 
 ---
 
