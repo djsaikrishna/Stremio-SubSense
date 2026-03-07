@@ -10,6 +10,7 @@ const { log } = require('./src/utils');
 const { convertToSrt, convertSubtitle, isAssFormat } = require('./src/services/subtitle-converter');
 const { bufferToUtf8 } = require('./src/utils/encoding');
 const { preloadParser } = require('./src/utils/filenameMatcher');
+const { initWyzieSources } = require('./src/providers/WyzieProvider');
 
 const app = express();
 const PORT = process.env.PORT || 3100;
@@ -1814,6 +1815,16 @@ app.listen(PORT, async () => {
     
     // Preload filename parser for faster first request
     await preloadParser();
+    
+    // Initialize Wyzie sources (fetch from API, start 24h refresh cycle)
+    await initWyzieSources();
+    
+    // Refresh WyzieProvider's sources after dynamic fetch
+    const { providerManager } = require('./src/providers');
+    const wyzieProvider = providerManager.get('wyzie');
+    if (wyzieProvider && wyzieProvider.refreshSources) {
+        wyzieProvider.refreshSources();
+    }
     
     // Initialize summary table on startup and start periodic updates (only if stats enabled)
     if (STATS_ENABLED && statsDB) {

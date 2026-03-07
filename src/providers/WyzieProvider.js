@@ -2,13 +2,9 @@
  * WyzieProvider
  * Subtitle provider using wyzie-lib
  * 
- * Wyzie aggregates subtitles from:
- * - OpenSubtitles
- * - SubDL
- * - Subf2m
- * - Podnapisi
- * - AnimeTosho
- * - Gestdown
+ * Wyzie aggregates subtitles from dynamically fetched sources.
+ * Sources are refreshed every 24 hours from the Wyzie API,
+ * with a hardcoded fallback for when the API is unavailable.
  * 
  * Fast-First Parallel Strategy:
  * - Query all sources in parallel for primary language
@@ -20,8 +16,144 @@ const { searchSubtitles } = require('wyzie-lib');
 const { BaseProvider, SubtitleResult } = require('./BaseProvider');
 const { log } = require('../utils');
 
-// Default sources if not configured
-const DEFAULT_SOURCES = ['OpenSubtitles', 'Subdl', 'Subf2m', 'Podnapisi', 'AnimeTosho', 'Gestdown'];
+// =====================================================
+// Wyzie Sources Registry
+// Dynamic source fetching with 24h refresh + hardcoded fallback
+// =====================================================
+
+const WYZIE_SOURCES_URL = 'https://sub.wyzie.ru/sources';
+const REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const FETCH_TIMEOUT_MS = 10000;
+
+/**
+ * Source metadata: lowercase key → { display, icon, url }
+ */
+const SOURCE_METADATA = {
+    'opensubtitles': { display: 'OpenSubtitles', icon: 'opensubtitles.ico', url: 'https://www.opensubtitles.com' },
+    'subdl':         { display: 'SubDL',         icon: 'subdl.png',         url: 'https://subdl.com' },
+    'subf2m':        { display: 'Subf2m',        icon: 'subf2m.png',        url: 'https://subf2m.co' },
+    'podnapisi':     { display: 'Podnapisi',     icon: 'podnapisi.ico',     url: 'https://www.podnapisi.net' },
+    'animetosho':    { display: 'AnimeTosho',    icon: 'animetosho.ico',    url: 'https://animetosho.org' },
+    'gestdown':      { display: 'Gestdown',      icon: 'gestdown.png',      url: 'https://gestdown.info' },
+    'jimaku':        { display: 'Jimaku',         icon: 'jimaku.png',        url: 'https://jimaku.cc' },
+    'kitsunekko':    { display: 'Kitsunekko',    icon: 'kitsunekko.png',    url: 'https://kitsunekko.net' },
+    'yify':          { display: 'YIFY',           icon: 'yify.ico',          url: 'https://yts-subs.com' }
+};
+
+const FALLBACK_SOURCES = [
+    'subdl', 'subf2m', 'opensubtitles', 'podnapisi',
+    'animetosho', 'jimaku', 'kitsunekko', 'gestdown', 'yify'
+];
+
+// Module-level cache state
+let _cachedSources = null;
+let _lastFetchTime = 0;
+let _refreshTimer = null;
+
+/**
+ * Fetch available sources from Wyzie API
+ */
+async function fetchWyzieSources() {
+    try {
+        const response = await fetch(WYZIE_SOURCES_URL, {
+            signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+            headers: { 'Accept': 'application/json' }
+        });
+        if (!response.ok) {
+            log('warn', `[WyzieSources] API returned ${response.status}`);
+            return null;
+        }
+        const data = await response.json();
+        if (!data || !Array.isArray(data.sources) || data.sources.length === 0) {
+            log('warn', '[WyzieSources] API response missing or empty sources array');
+            return null;
+        }
+        const valid = data.sources.every(s => typeof s === 'string' && s.length > 0);
+        if (!valid) {
+            log('warn', '[WyzieSources] API response contains invalid source entries');
+            return null;
+        }
+        return data.sources.map(s => s.toLowerCase());
+    } catch (error) {
+        log('warn', `[WyzieSources] Failed to fetch: ${error.message}`);
+        return null;
+    }
+}
+
+/**
+ * Get current active sources.
+ * Priority: 1) WYZIE_SOURCES env var  2) Cached API response  3) Hardcoded fallback
+ */
+function getActiveSources() {
+    const envSources = process.env.WYZIE_SOURCES;
+    if (envSources) {
+        const sources = envSources.split(',').map(s => s.trim().toLowerCase()).filter(s => s);
+        if (sources.length > 0) {
+            return sources;
+        }
+    }
+    if (_cachedSources && _cachedSources.length > 0) {
+        return _cachedSources;
+    }
+    return [...FALLBACK_SOURCES];
+}
+
+/**
+ * Get PascalCase display name for a source
+ */
+function getSourceDisplayName(source) {
+    const meta = SOURCE_METADATA[source.toLowerCase()];
+    return meta ? meta.display : source.charAt(0).toUpperCase() + source.slice(1);
+}
+
+/**
+ * Get metadata for all active sources (for API/frontend consumption)
+ */
+function getActiveSourcesMetadata() {
+    const sources = getActiveSources();
+    return sources.map(source => {
+        const meta = SOURCE_METADATA[source] || {};
+        return {
+            id: source,
+            display: meta.display || source.charAt(0).toUpperCase() + source.slice(1),
+            icon: meta.icon || null,
+            url: meta.url || null
+        };
+    });
+}
+
+/**
+ * Initialize: fetch from API and start 24h periodic refresh.
+ * Call once at server startup.
+ */
+async function initWyzieSources() {
+    log('info', '[WyzieSources] Initializing — fetching available sources from API...');
+    const sources = await fetchWyzieSources();
+    if (sources) {
+        _cachedSources = sources;
+        _lastFetchTime = Date.now();
+        log('info', `[WyzieSources] Loaded ${sources.length} sources from API: ${sources.join(', ')}`);
+    } else {
+        _cachedSources = [...FALLBACK_SOURCES];
+        log('warn', `[WyzieSources] API unavailable, using ${FALLBACK_SOURCES.length} fallback sources`);
+    }
+    if (_refreshTimer) clearInterval(_refreshTimer);
+    _refreshTimer = setInterval(async () => {
+        log('debug', '[WyzieSources] Periodic refresh — fetching sources...');
+        const refreshed = await fetchWyzieSources();
+        if (refreshed) {
+            const changed = JSON.stringify(refreshed) !== JSON.stringify(_cachedSources);
+            _cachedSources = refreshed;
+            _lastFetchTime = Date.now();
+            if (changed) {
+                log('info', `[WyzieSources] Sources updated: ${refreshed.join(', ')}`);
+            }
+        } else {
+            log('warn', '[WyzieSources] Refresh failed, keeping previous sources');
+        }
+    }, REFRESH_INTERVAL_MS);
+    return getActiveSources();
+}
 
 // Fast-first configuration 
 const FAST_FIRST_CONFIG = {
@@ -39,8 +171,8 @@ class WyzieProvider extends BaseProvider {
     constructor(options = {}) {
         super('wyzie', options);
         
-        // Get sources from options or environment
-        this.sources = options.sources || this._getSourcesFromEnv();
+        // Get sources from options or dynamically from the wyzie-sources registry
+        this.sources = options.sources || this._resolveActiveSources();
         
         // Fast-first configuration
         this.minSubtitles = options.minSubtitles || FAST_FIRST_CONFIG.minSubtitles;
@@ -51,19 +183,24 @@ class WyzieProvider extends BaseProvider {
     }
 
     /**
-     * Get sources from environment variable
-     * Uses WYZIE_SOURCES if set, otherwise uses DEFAULT_SOURCES
+     * Resolve active sources from the wyzie-sources registry.
+     * The registry handles env var override, cached API response, and fallback.
+     * Returns PascalCase display names for wyzie-lib compatibility.
      * @private
      */
-    _getSourcesFromEnv() {
-        const envSources = process.env.WYZIE_SOURCES;
-        if (envSources) {
-            const sources = envSources.split(',').map(s => s.trim()).filter(s => s);
-            log('debug', `[WyzieProvider] Using sources from WYZIE_SOURCES: ${sources.join(', ')}`);
-            return sources;
-        }
-        log('debug', `[WyzieProvider] Using default sources: ${DEFAULT_SOURCES.join(', ')}`);
-        return DEFAULT_SOURCES;
+    _resolveActiveSources() {
+        const sources = getActiveSources();
+        // wyzie-lib expects PascalCase source names
+        const displayNames = sources.map(s => getSourceDisplayName(s));
+        log('debug', `[WyzieProvider] Active sources: ${displayNames.join(', ')}`);
+        return displayNames;
+    }
+
+    /**
+     * Refresh sources from the registry (call after initWyzieSources)
+     */
+    refreshSources() {
+        this.sources = this._resolveActiveSources();
     }
 
     /**
@@ -867,3 +1004,9 @@ class WyzieProvider extends BaseProvider {
 }
 
 module.exports = WyzieProvider;
+module.exports.initWyzieSources = initWyzieSources;
+module.exports.getActiveSources = getActiveSources;
+module.exports.getActiveSourcesMetadata = getActiveSourcesMetadata;
+module.exports.getSourceDisplayName = getSourceDisplayName;
+module.exports.SOURCE_METADATA = SOURCE_METADATA;
+module.exports.FALLBACK_SOURCES = FALLBACK_SOURCES;
