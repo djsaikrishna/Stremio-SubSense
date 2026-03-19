@@ -12,7 +12,7 @@
  * - Continue fetching in background for caching
  */
 
-const { searchSubtitles } = require('wyzie-lib');
+const { searchSubtitles, configure: configureWyzie } = require('wyzie-lib');
 const { BaseProvider, SubtitleResult } = require('./BaseProvider');
 const { log } = require('../utils');
 
@@ -21,9 +21,18 @@ const { log } = require('../utils');
 // Dynamic source fetching with 24h refresh + hardcoded fallback
 // =====================================================
 
-const WYZIE_SOURCES_URL = 'https://sub.wyzie.ru/sources';
+const WYZIE_SOURCES_URL = 'https://sub.wyzie.io/sources';
+const WYZIE_BASE_URL = 'https://sub.wyzie.io';
 const REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const FETCH_TIMEOUT_MS = 10000;
+
+/**
+ * Get the Wyzie API key from environment
+ * @returns {string|null}
+ */
+function getWyzieApiKey() {
+    return process.env.WYZIE_API_KEY || null;
+}
 
 /**
  * Source metadata: lowercase key → { display, icon, url }
@@ -55,7 +64,12 @@ let _refreshTimer = null;
  */
 async function fetchWyzieSources() {
     try {
-        const response = await fetch(WYZIE_SOURCES_URL, {
+        let url = WYZIE_SOURCES_URL;
+        const apiKey = getWyzieApiKey();
+        if (apiKey) {
+            url += `?key=${encodeURIComponent(apiKey)}`;
+        }
+        const response = await fetch(url, {
             signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
             headers: { 'Accept': 'application/json' }
         });
@@ -127,6 +141,10 @@ function getActiveSourcesMetadata() {
  * Call once at server startup.
  */
 async function initWyzieSources() {
+    const apiKey = getWyzieApiKey();
+    configureWyzie({ baseUrl: WYZIE_BASE_URL, ...(apiKey && { key: apiKey }) });
+    
+    log('info', `[WyzieSources] API key: ${apiKey ? 'configured (global)' : 'NOT SET (required — get one free at https://sub.wyzie.io/redeem)'}`);
     log('info', '[WyzieSources] Initializing — fetching available sources from API...');
     const sources = await fetchWyzieSources();
     if (sources) {
