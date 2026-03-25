@@ -359,6 +359,9 @@ class SubSourceProvider extends BaseProvider {
         if (query.episode) {
             params.set('episode', query.episode.toString());
         }
+        if (query.filename) {
+            params.set('filename', query.filename);
+        }
        
         const sanitizedRelease = releaseInfo
             ? releaseInfo

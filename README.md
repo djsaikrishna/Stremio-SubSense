@@ -64,18 +64,27 @@ Open `/configure` in your browser to access the configuration page.
 ```yaml
 services:
   subsense:
-    image: nepiraw/subsense:latest
-    container_name: subsense
+    image: nepiraw/stremio-subsense:latest
+    container_name: stremio-subsense
     restart: unless-stopped
     ports:
-      - "3100:3100"
+      - "${PORT:-3100}:3100"
+    env_file:
+      - .env
     environment:
-      - PORT=3100
-      - LOG_LEVEL=info
-      # Required for SubSource provider (generate a secure random key)
-      - SUBSENSE_ENCRYPTION_KEY=your-secure-passphrase-here
-      # Optional: BetaSeries API key for French subtitles
-      # - BETASERIES_API_KEY=your_api_key_here
+      - PORT=${PORT:-3100}
+      - SUBSENSE_BASE_URL=${SUBSENSE_BASE_URL:-https://subsense.yourdomain.com}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - SUBSENSE_ENCRYPTION_KEY=${SUBSENSE_ENCRYPTION_KEY:-}
+      - SUBTITLE_SOURCES=${SUBTITLE_SOURCES:-wyzie,betaseries,yify,tvsubtitles,subsource}
+      - WYZIE_API_KEY=${WYZIE_API_KEY:-}
+      - WYZIE_SOURCES=${WYZIE_SOURCES:-}
+      - BETASERIES_API_KEY=${BETASERIES_API_KEY:-}
+      - SUBSOURCE_API_KEY=${SUBSOURCE_API_KEY:-}
+      - ENABLE_CACHE=${ENABLE_CACHE:-true}
+      - DB_PATH=${DB_PATH:-/app/data/subsense.db}
+      - CACHE_RETENTION_DAYS=${CACHE_RETENTION_DAYS:-30}
+      - STATS_REFRESH_INTERVAL=${STATS_REFRESH_INTERVAL:-120000}
     volumes:
       - ./data:/app/data  # Persist cache database
 ```
@@ -98,18 +107,21 @@ Access your addon at `http://localhost:3100`
 
 ## 🔧 Environment Variables
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `PORT` | 3100 | Server port |
-| `SUBSENSE_BASE_URL` | Auto-detected | Public URL for production deployments |
-| `LOG_LEVEL` | info | Logging level: `debug`, `info`, `warn`, `error` |
-| `SUBSENSE_ENCRYPTION_KEY` | — | **Required to encrypt users' API keys.** Secure passphrase for encrypting API keys |
-| `SUBTITLE_SOURCES` | All | Comma-separated list of providers to enable |
-| `WYZIE_SOURCES` | All | Comma-separated list of Wyzie sources to query |
-| `BETASERIES_API_KEY` | — | API key for BetaSeries provider (French subtitles) |
-| `ENABLE_CACHE` | true | Enable/disable caching |
-| `CACHE_RETENTION_DAYS` | 30 | Days before cache cleanup |
-| `STATS_REFRESH_INTERVAL` | 120000 | Stats refresh interval in milliseconds. Set to `0` to **completely disable** stats pages and API endpoints |
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `PORT` | Optional | `3100` | Server port exposed by the addon |
+| `SUBSENSE_BASE_URL` | Optional | Auto-detected | Public base URL used in generated proxy links for production deployments |
+| `LOG_LEVEL` | Optional | `info` | Logging level: `debug`, `info`, `warn`, `error` |
+| `SUBSENSE_ENCRYPTION_KEY` | **Required** | — | Secret used to encrypt/decrypt user-provided provider API keys inside manifest URLs |
+| `SUBTITLE_SOURCES` | Optional | `wyzie,betaseries,yify,tvsubtitles,subsource` | Comma-separated list of enabled providers |
+| `WYZIE_API_KEY` | **Required** | — | Server-side Wyzie API key. Required because Wyzie now requires a key for search and download requests |
+| `WYZIE_SOURCES` | Optional | All available sources | Override the Wyzie sources queried by the `wyzie` provider |
+| `BETASERIES_API_KEY` | Optional | — | Server-side BetaSeries API key for BetaSeries subtitle searches |
+| `SUBSOURCE_API_KEY` | Optional | — | Server-side SubSource API key for local testing/admin validation only. End users normally provide their own key through addon configuration |
+| `ENABLE_CACHE` | Optional | `true` | Enable/disable subtitle result caching |
+| `DB_PATH` | Optional | `./data/subsense.db` | SQLite / LibSQL database path for the subtitle cache |
+| `CACHE_RETENTION_DAYS` | Optional | `30` | Days before old cache entries are cleaned up |
+| `STATS_REFRESH_INTERVAL` | Optional | `120000` | Stats refresh interval in milliseconds. Set to `0` to disable stats pages and stats API endpoints |
 
 ### Available Providers
 
@@ -117,7 +129,7 @@ These are the high-level providers that SubSense can use:
 
 | Provider | Description | Requires API Key |
 |----------|-------------|------------------|
-| `wyzie` | Aggregates multiple sources (see Wyzie Sources below) | No |
+| `wyzie` | Aggregates multiple sources (see Wyzie Sources below) | Yes (server-side `WYZIE_API_KEY`) |
 | `subsource` | SubSource.net - Large subtitle database | Yes (per-user) |
 | `yify` | YIFY/YTS movie subtitles | No |
 | `tvsubtitles` | TVsubtitles.net for TV series | No |

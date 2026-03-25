@@ -1064,9 +1064,12 @@ setInterval(cleanSubsourceCache, 60 * 60 * 1000);
 
 app.get('/api/subsource/proxy/:subtitleId/:releaseName?', async (req, res) => {
     const { subtitleId, releaseName } = req.params;
-    const { key, season, episode } = req.query;
+    const { key, season, episode, filename } = req.query;
+    const cacheFileHint = typeof filename === 'string' && filename.trim()
+        ? filename.trim().toLowerCase()
+        : 'nofilename';
     
-    const cacheKey = `${subtitleId}:${season || 'all'}:${episode || 'all'}`;
+    const cacheKey = `${subtitleId}:${season || 'all'}:${episode || 'all'}:${cacheFileHint}`;
     
     try {
         // Check cache first
@@ -1250,15 +1253,15 @@ app.get('/api/subsource/proxy/:subtitleId/:releaseName?', async (req, res) => {
             
             if (seNum) {
                 // Most specific: S01E07 with exact season
-                patterns.push(new RegExp(`[sS]${seNum}[eE]${epNum}\\b`, 'i'));
-                patterns.push(new RegExp(`[sS]0*${season}[eE]${epNum}\\b`, 'i'));
+                patterns.push(new RegExp(`[sS]${seNum}[eE]${epNum}(?!\\d)`, 'i'));
+                patterns.push(new RegExp(`[sS]0*${season}[eE]${epNum}(?!\\d)`, 'i'));
             }
             
             // Less specific patterns (fallback if no season match)
             patterns.push(
-                new RegExp(`[sS]\\d+[eE]${epNum}\\b`, 'i'),  // S##E07 (any season)
-                new RegExp(`[eE]${epNum}\\b`, 'i'),          // E07
-                new RegExp(`x${epNum}\\b`, 'i'),             // 1x07
+                new RegExp(`[sS]\\d+[eE]${epNum}(?!\\d)`, 'i'),  // S##E07 (any season)
+                new RegExp(`[eE]${epNum}(?!\\d)`, 'i'),          // E07
+                new RegExp(`x${epNum}(?!\\d)`, 'i'),             // 1x07
                 new RegExp(`\\.${epNum}\\.`, 'i'),           // .07.
                 new RegExp(`-${epNum}-`, 'i'),               // -07-
                 new RegExp(` ${epNum} `),                    // " 07 " (space-padded)
@@ -1267,7 +1270,7 @@ app.get('/api/subsource/proxy/:subtitleId/:releaseName?', async (req, res) => {
             
             // First pass: try to match with exact season if provided
             if (seNum) {
-                const exactSeasonPattern = new RegExp(`[sS]0*${season}[eE]${epNum}\\b`, 'i');
+                const exactSeasonPattern = new RegExp(`[sS]0*${season}[eE]${epNum}(?!\\d)`, 'i');
                 for (const entry of subtitleEntries) {
                     if (exactSeasonPattern.test(entry.name)) {
                         selectedEntry = entry;
@@ -1623,8 +1626,33 @@ app.get('/api/subtitle/:format/*', async (req, res) => {
     log('debug', `Subtitle proxy request: format=${format}, url=${originalUrl}`);
     
     try {
+        const proxiedUrl = new URL(originalUrl);
+
+        for (const [queryKey, queryValue] of Object.entries(req.query || {})) {
+            if (queryValue === undefined || queryValue === null || proxiedUrl.searchParams.has(queryKey)) {
+                continue;
+            }
+
+            if (Array.isArray(queryValue)) {
+                for (const value of queryValue) {
+                    if (value !== undefined && value !== null) {
+                        proxiedUrl.searchParams.append(queryKey, value);
+                    }
+                }
+            } else {
+                proxiedUrl.searchParams.set(queryKey, queryValue);
+            }
+        }
+
+        if (proxiedUrl.hostname === 'sub.wyzie.io') {
+            const wyzieApiKey = process.env.WYZIE_API_KEY;
+            if (wyzieApiKey && !proxiedUrl.searchParams.has('key')) {
+                proxiedUrl.searchParams.set('key', wyzieApiKey);
+            }
+        }
+
         // Fetch the original subtitle
-        const response = await fetch(originalUrl);
+        const response = await fetch(proxiedUrl.toString());
         
         if (!response.ok) {
             log('error', `Failed to fetch subtitle: ${response.status} ${response.statusText}`);

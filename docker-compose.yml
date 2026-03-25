@@ -4,22 +4,22 @@ services:
     container_name: stremio-subsense
     restart: unless-stopped
     ports:
-      - "3100:3100"
-    #env_file:
-    #  - .env
+      - "${PORT:-3100}:3100"
+    env_file:
+      - .env
     environment:
-      - PORT=3100
-      - SUBSENSE_BASE_URL=https://subsense.yourdomain.com
-      - LOG_LEVEL=info
+      - PORT=${PORT:-3100}
+      - SUBSENSE_BASE_URL=${SUBSENSE_BASE_URL:-https://subsense.yourdomain.com}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - SUBSENSE_ENCRYPTION_KEY=${SUBSENSE_ENCRYPTION_KEY:-}
+      - SUBTITLE_SOURCES=${SUBTITLE_SOURCES:-wyzie,betaseries,yify,tvsubtitles,subsource}
+      - WYZIE_API_KEY=${WYZIE_API_KEY:-}
+      - WYZIE_SOURCES=${WYZIE_SOURCES:-}
       - BETASERIES_API_KEY=${BETASERIES_API_KEY:-}
+      - SUBSOURCE_API_KEY=${SUBSOURCE_API_KEY:-}
+      - ENABLE_CACHE=${ENABLE_CACHE:-true}
+      - DB_PATH=${DB_PATH:-/app/data/subsense.db}
+      - CACHE_RETENTION_DAYS=${CACHE_RETENTION_DAYS:-30}
+      - STATS_REFRESH_INTERVAL=${STATS_REFRESH_INTERVAL:-120000}
     volumes:
-      - subsense-data:./data
-    networks:
-      - subsense-network
-
-volumes:
-  subsense-data:
-
-networks:
-  subsense-network:
-    external:true
+      - ./data:/app/data
