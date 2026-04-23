@@ -15,6 +15,7 @@ const { registerDefaultProviders } = require('./providers');
 const { warmupResponseCache } = require('./handlers/subtitles');
 const routes = require('./routes');
 const db = require('./cache/database-libsql');
+const { initStats, getStatsMode } = require('./stats');
 
 const PORT = parseInt(process.env.PORT, 10) || 3000;
 const HOST = process.env.HOST || '127.0.0.1';
@@ -36,6 +37,7 @@ async function bootstrap() {
     app.use('/api', routes.configApi);
     app.use('/api', routes.proxy);
     app.use(routes.health);
+    app.use(routes.statsApi);
     app.use(routes.stremio);
 
     app.use((req, res) => res.status(404).json({ error: 'Not found', path: req.path }));
@@ -46,6 +48,8 @@ async function bootstrap() {
     });
 
     await db.initializeDatabase();
+    await initStats();
+    log('info', `[server] stats mode: ${getStatsMode()}`);
 
     registerDefaultProviders();
     await Promise.allSettled([
@@ -89,12 +93,13 @@ function installShutdownHandlers(server) {
 
         server.close((err) => {
             if (err) log('warn', `[server] close error: ${err.message}`);
-            db.close()
-                .catch((dbErr) => log('warn', `[server] db close error: ${dbErr.message}`))
-                .finally(() => {
-                    log('info', '[server] shutdown complete');
-                    process.exit(0);
-                });
+            try {
+                db.close();
+            } catch (dbErr) {
+                log('warn', `[server] db close error: ${dbErr.message}`);
+            }
+            log('info', '[server] shutdown complete');
+            process.exit(0);
         });
     };
 

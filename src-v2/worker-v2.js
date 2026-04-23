@@ -21,6 +21,7 @@ const path = require('path');
 const { log } = require('../src/utils');
 const db = require('./cache/database-libsql');
 const CacheCleaner = require('./cache/cache-cleaner');
+const { initStats, isFullStats, isStatsEnabled, statsDB, STATS_REFRESH_INTERVAL, flushWrites } = require('./stats');
 
 const CLEANUP_INTERVAL_MS    = intEnv('WORKER_CLEANUP_INTERVAL_MS',    2 * 60 * 60 * 1000);
 const CHECKPOINT_INTERVAL_MS = intEnv('WORKER_CHECKPOINT_INTERVAL_MS', 30 * 60 * 1000);
@@ -43,11 +44,21 @@ function intEnv(name, fallback) {
 async function bootstrap() {
     log('info', '[worker] starting');
     await db.initializeDatabase();
+    await initStats();
 
     schedule('cleanup',    CLEANUP_INTERVAL_MS,    runCleanup);
     schedule('checkpoint', CHECKPOINT_INTERVAL_MS, runCheckpoint);
     schedule('optimize',   OPTIMIZE_INTERVAL_MS,   runOptimize);
     schedule('health',     HEALTH_INTERVAL_MS,     writeHealthSnapshot);
+
+    if (isFullStats() && STATS_REFRESH_INTERVAL > 0) {
+        schedule('stats-recompute', STATS_REFRESH_INTERVAL, runStatsRecompute);
+    }
+
+    if (isStatsEnabled()) {
+        const SIX_HOURS_MS = 6 * 60 * 60 * 1000; // Cleanup inactive users daily (runs every 6 hours, deletes >30-day inactive)
+        schedule('user-cleanup', SIX_HOURS_MS, runUserCleanup);
+    }
 
     log('info',
         `[worker] ready cleanup=${CLEANUP_INTERVAL_MS/60000}m checkpoint=${CHECKPOINT_INTERVAL_MS/60000}m optimize=${OPTIMIZE_INTERVAL_MS/60000}m health=${HEALTH_INTERVAL_MS/1000}s`);
@@ -112,6 +123,22 @@ function readPragmaInt(row) {
     return Number.isFinite(n) ? n : 0;
 }
 
+async function runStatsRecompute() {
+    try {
+        await statsDB.recomputeSummary();
+    } catch (err) {
+        log('warn', `[worker] stats recompute failed: ${err.message}`);
+    }
+}
+
+async function runUserCleanup() {
+    try {
+        await statsDB.cleanupInactiveUsers();
+    } catch (err) {
+        log('warn', `[worker] user cleanup failed: ${err.message}`);
+    }
+}
+
 async function writeHealthSnapshot() {
     let subtitle = 0;
     try {
@@ -162,6 +189,10 @@ async function shutdown(signal) {
     if (typeof force.unref === 'function') force.unref();
 
     for (const { handle } of intervals) clearInterval(handle);
+
+    try {
+        await flushWrites();
+    } catch (_) { /* best-effort */ }
 
     try {
         await runCleanup();

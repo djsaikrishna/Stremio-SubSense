@@ -3,6 +3,7 @@
 const express = require('express');
 const { log } = require('../../src/utils');
 const { providerManager } = require('../providers');
+const { isFullStats, isMinimalStats, isStatsEnabled, statsDB } = require('../stats');
 
 let encryptConfig = null;
 let isEncryptionConfigured = () => false;
@@ -30,6 +31,67 @@ router.post('/config/encrypt', (req, res) => {
     } catch (err) {
         log('error', `[routes/config-api] encrypt failed: ${err.message}`);
         res.status(500).json({ error: 'Encryption failed' });
+    }
+});
+
+router.get('/version', (_req, res) => {
+    const packageJson = require('../../package.json');
+    res.json({ version: packageJson.version });
+});
+
+router.get('/config', async (req, res) => {
+    const packageJson = require('../../package.json');
+    const config = {
+        statsEnabled: isFullStats(),
+        version: packageJson.version
+    };
+
+    if (isStatsEnabled()) {
+        try {
+            config.userStats = await statsDB.getUserCounts(15);
+        } catch (err) {
+            log('debug', `[routes/config-api] userStats error: ${err.message}`);
+            config.userStats = { totalUsers: 0, activeUsers: 0 };
+        }
+    }
+
+    res.json(config);
+});
+
+router.get('/languages', (req, res) => {
+    const { getSupportedLanguages, LANGUAGE_TABLE, SPECIAL_CODE_MAPPINGS, getByAnyCode } = require('../../src/languages');
+
+    const format = req.query.format || 'simple';
+
+    if (format === 'full') {
+        res.json(LANGUAGE_TABLE.map(lang => ({
+            alpha2: lang.alpha2,
+            alpha3B: lang.alpha3B,
+            alpha3T: lang.alpha3T,
+            name: lang.name,
+            nativeName: lang.nativeName,
+            providerCodes: lang.providerCodes
+        })));
+    } else if (format === 'lookup') {
+        const lookup = {};
+        LANGUAGE_TABLE.forEach(lang => {
+            const name = lang.name;
+            if (lang.alpha2) lookup[lang.alpha2.toLowerCase()] = name;
+            if (lang.alpha3B) lookup[lang.alpha3B.toLowerCase()] = name;
+            if (lang.alpha3T) lookup[lang.alpha3T.toLowerCase()] = name;
+        });
+        Object.entries(SPECIAL_CODE_MAPPINGS).forEach(([code, mappedCode]) => {
+            const lang = getByAnyCode(mappedCode);
+            if (lang) {
+                lookup[code.toLowerCase()] = lang.name;
+            }
+        });
+        res.json(lookup);
+    } else {
+        res.json(LANGUAGE_TABLE.map(lang => ({
+            code: lang.alpha2,
+            name: lang.name
+        })));
     }
 });
 

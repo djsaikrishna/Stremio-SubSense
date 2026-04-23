@@ -5,6 +5,7 @@ const { mapStremioToWyzie } = require('../../src/languages');
 const { providerManager } = require('../providers');
 const { ResponseCache, SubtitleCache } = require('../cache');
 const { prioritizeByLanguage, formatForStremio } = require('../utils/format');
+const { statsService } = require('../stats');
 
 let encryptConfig = null;
 try {
@@ -63,6 +64,7 @@ async function handleSubtitlesRequest(args, parsedConfig) {
         if (cached.status === 'stale') {
             scheduleRefresh(parsed, wyzieLanguages, languages, parsedConfig, filename, apiKey, encryptedApiKey, cacheKey, requestContext);
         }
+        fireTrack(parsedConfig, parsed, languages, cached.subtitles, Date.now() - startedAt, true);
         return { subtitles: cached.subtitles };
     }
 
@@ -79,7 +81,7 @@ async function handleSubtitlesRequest(args, parsedConfig) {
         { dedupeKey: cacheKey }
     );
 
-    const formatted = buildFormatted(result.subtitles, languages, 0);
+    const { formatted, languageMatch } = buildFormatted(result.subtitles, languages, 0);
 
     responseCache.set(cacheKey, formatted);
     persistL2(parsed, formatted).catch((err) =>
@@ -93,12 +95,36 @@ async function handleSubtitlesRequest(args, parsedConfig) {
     log('info',
         `[handler] miss ${reqTag(parsed, wyzieLanguages)} -> ${formatted.length} subs (returning ${finalSubs ? finalSubs.subtitles.length : 0}) in ${Date.now() - startedAt}ms`);
 
-    return { subtitles: finalSubs ? finalSubs.subtitles : formatted };
+    const returnedSubs = finalSubs ? finalSubs.subtitles : formatted;
+    fireTrack(parsedConfig, parsed, languages, returnedSubs, Date.now() - startedAt, false, languageMatch);
+    return { subtitles: returnedSubs };
+}
+
+function fireTrack(parsedConfig, parsed, languages, subtitles, fetchTimeMs, cacheHit, languageMatch) {
+    try {
+        statsService.trackRequest({
+            type: parsed.type,
+            userId: parsedConfig.userId,
+            imdbId: parsed.imdbId,
+            languages,
+            season: parsed.season,
+            episode: parsed.episode,
+            fetchTimeMs,
+            subtitleCount: subtitles ? subtitles.length : 0,
+            subtitles: subtitles || [],
+            cacheHit,
+            languageMatch: languageMatch || null
+        });
+    } catch (_) { /* never fail the response path */ }
 }
 
 function buildFormatted(rawSubtitles, languages, maxPerLang) {
-    const { subtitles } = prioritizeByLanguage(rawSubtitles, languages, maxPerLang);
-    return formatForStremio(subtitles);
+    const { subtitles, languageMatch } = prioritizeByLanguage(rawSubtitles, languages, maxPerLang);
+    languageMatch.languages = languages;
+    languageMatch.found = languages.filter(l => languageMatch.byLanguage[l]?.found);
+    languageMatch.anyPreferredFound = languageMatch.found.length > 0;
+    languageMatch.allPreferredFound = languageMatch.found.length === languages.length;
+    return { formatted: formatForStremio(subtitles), languageMatch };
 }
 
 function persistL2(parsed, formatted) {
@@ -122,7 +148,7 @@ function wireBackgroundPromises(promises, parsed, languages, parsedConfig, cache
         }
         if (extra.length === 0) return;
 
-        const extraFormatted = buildFormatted(extra, languages, 0);
+        const { formatted: extraFormatted } = buildFormatted(extra, languages, 0);
         const merged = mergeFormatted(foregroundFormatted, extraFormatted);
         const added = merged.length - foregroundFormatted.length;
         if (added <= 0) return;
@@ -161,7 +187,7 @@ function scheduleRefresh(parsed, wyzieLanguages, languages, parsedConfig, filena
             encryptedApiKeys: { subsource: encryptedApiKey }
         }, { dedupeKey: `${cacheKey}:refresh` })
             .then((res) => {
-                const formatted = buildFormatted(res.subtitles, languages, 0);
+                const { formatted } = buildFormatted(res.subtitles, languages, 0);
                 if (formatted.length > 0) {
                     responseCache.set(cacheKey, formatted);
                     persistL2(parsed, formatted).catch(() => {});

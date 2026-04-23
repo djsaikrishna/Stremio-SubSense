@@ -198,11 +198,12 @@ body::before {
 
 .header-meta {
     display: flex;
+    flex-direction: column;
     justify-content: center;
     align-items: center;
     margin-top: 12px;
     margin-bottom: 16px;
-    gap: 12px;
+    gap: 6px;
 }
 
 .tagline {

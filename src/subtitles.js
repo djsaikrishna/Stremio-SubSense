@@ -19,7 +19,7 @@ const MAX_SUBTITLES = parseInt(process.env.MAX_SUBTITLES, 10) || 30;
 // --- Download Count & Rating Normalization ---
 
 /**
- * Normalize download count to 0–1 range using log scale.
+ * Normalize download count to 0-1 range using log scale.
  * Returns 0 if no download count is available
  */
 function normalizeDownloadCount(sub) {
@@ -29,7 +29,7 @@ function normalizeDownloadCount(sub) {
 }
 
 /**
- * Normalize rating to 0–1 range.
+ * Normalize rating to 0-1 range.
  * Different providers use different scales — normalize per provider.
  * Returns 0 if no rating available.
  */
@@ -38,7 +38,7 @@ function normalizeRating(sub) {
     if (rating == null || rating <= 0) return 0;
 
     if (sub.provider === 'betaseries') {
-        return Math.min(1, rating / 10); // BetaSeries quality: 0–10
+        return Math.min(1, rating / 10); // BetaSeries quality: 0-10
     }
     if (sub.provider === 'yify') {
         return Math.min(1, Math.log10(rating + 1) / 2); // YIFY upvotes: log scale
@@ -588,12 +588,12 @@ function prioritizeSubtitlesMulti(subtitles, languages, maxSubtitles = 0) {
 
     // Sort within each group by metadata-driven quality indicators
     const sortByQuality = (a, b) => {
-        // 1. Prefer higher download count (normalized 0–1, log scale)
+        // 1. Prefer higher download count (normalized 0-1, log scale)
         const dlA = normalizeDownloadCount(a);
         const dlB = normalizeDownloadCount(b);
         if (dlA !== dlB) return dlB - dlA;
 
-        // 2. Prefer higher rating (normalized 0–1, provider-specific)
+        // 2. Prefer higher rating (normalized 0-1, provider-specific)
         const rA = normalizeRating(a);
         const rB = normalizeRating(b);
         if (rA !== rB) return rB - rA;

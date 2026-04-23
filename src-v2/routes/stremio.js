@@ -30,6 +30,9 @@ router.get('/:config/manifest.json', (req, res) => {
     if (config && Array.isArray(config.languages) && config.languages.length > 0) {
         delete manifest.behaviorHints.configurationRequired;
     }
+    const langs = config && config.languages ? config.languages.join(',') : 'none';
+    const uid = config && config.userId ? config.userId : 'anon';
+    log('info', `[Manifest] ${uid} langs=[${langs}] url=/${req.params.config}/manifest.json`);
     setStremioHeaders(res);
     res.json(manifest);
 });
@@ -37,8 +40,9 @@ router.get('/:config/manifest.json', (req, res) => {
 router.get('/:config/subtitles/:type/:id/:extra?.json', async (req, res) => {
     setStremioHeaders(res);
     try {
-        const { config: rawConfig } = parseConfigParam(req.params.config);
+        const { userId, config: rawConfig } = parseConfigParam(req.params.config);
         const validatedConfig = parseConfig(rawConfig || {});
+        if (userId) validatedConfig.userId = userId;
         const args = {
             type: req.params.type,
             id: req.params.id,
@@ -67,7 +71,7 @@ function parseConfigParam(raw) {
     try {
         config = JSON.parse(decodeURIComponent(configString));
     } catch (_) { /* fall through */ }
-    // 2) Legacy plain base64 JSON — try before decrypt to avoid noisy crypto errors
+    // 2) Legacy plain base64 JSON
     if (!config) {
         try {
             const decoded = Buffer.from(configString, 'base64').toString('utf8');
@@ -76,7 +80,7 @@ function parseConfigParam(raw) {
             }
         } catch (_) { /* fall through */ }
     }
-    // 3) Encrypted config (only attempt when encryption is actually configured)
+    // 3) Encrypted config (if encryption is configured)
     if (!config && decryptConfig && isEncryptionConfigured()) {
         try {
             config = decryptConfig(configString);

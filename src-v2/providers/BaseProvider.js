@@ -75,6 +75,31 @@ class BaseProvider {
             this.stats.failedRequests++;
             this.stats.lastError = error ? error.message : 'Unknown error';
         }
+
+        this._recordToDatabase(success, fetchTimeMs, subtitleCount);
+    }
+
+    _recordToDatabase(success, responseMs, subtitlesCount) {
+        try {
+            if (!this._statsDB) {
+                try {
+                    const { statsDB, isFullStats, queueWrite } = require('../stats');
+                    if (!isFullStats()) return;
+                    this._statsDB = statsDB;
+                    this._queueWrite = queueWrite;
+                } catch (_) { return; }
+            }
+            if (this._statsDB && this._statsDB.recordProviderStats) {
+                const fn = () => this._statsDB.recordProviderStats({
+                    providerName: this.name,
+                    success,
+                    responseMs: responseMs || 0,
+                    subtitlesCount: subtitlesCount || 0
+                });
+                if (this._queueWrite) this._queueWrite(fn);
+                else fn().catch(() => {});
+            }
+        } catch (_) { /* never fail the request path */ }
     }
 }
 

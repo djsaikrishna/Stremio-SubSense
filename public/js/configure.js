@@ -172,6 +172,28 @@ async function fetchVersion() {
                 }
             }
         }
+
+        if (data.userStats) {
+            const headerMeta = document.querySelector('.header-meta');
+            if (headerMeta) {
+                const container = document.createElement('div');
+                container.style.cssText = 'display:flex;gap:12px;align-items:center;margin-top:4px;font-size:0.75rem;';
+
+                const activeBadge = document.createElement('span');
+                activeBadge.style.cssText = 'display:flex;align-items:center;gap:4px;color:#a0a0a0;';
+                activeBadge.innerHTML = `<span style="width:7px;height:7px;border-radius:50%;background:#4ade80;display:inline-block;box-shadow:0 0 6px #4ade8099;"></span> ${data.userStats.activeUsers} active`;
+                activeBadge.title = 'Active users in the last 15 minutes';
+
+                const totalBadge = document.createElement('span');
+                totalBadge.style.cssText = 'display:flex;align-items:center;gap:4px;color:#a0a0a0;';
+                totalBadge.innerHTML = `<span style="width:7px;height:7px;border-radius:50%;background:#6b7280;display:inline-block;"></span> ${data.userStats.totalUsers} users`;
+                totalBadge.title = 'Unique users in the last 30 days';
+
+                container.appendChild(activeBadge);
+                container.appendChild(totalBadge);
+                headerMeta.appendChild(container);
+            }
+        }
     } catch (error) {
         console.error('Failed to fetch config:', error);
         versionBadge.textContent = 'v?.?.?';
