@@ -84,20 +84,28 @@ function formatForStremio(subtitles) {
         const subIdBase = sub.id || Date.now();
         const sourceUrl = withSubsourcePlaceholder(sub.url);
 
+        // Preserve original metadata for filename matching on cache hits
+        const matchMeta = {};
+        if (sub.fileName) matchMeta.fileName = sub.fileName;
+        if (release) matchMeta.releaseName = release;
+        if (Array.isArray(sub.releases) && sub.releases.length > 0) matchMeta.releases = sub.releases;
+
         if (isAss) {
             out.push({
                 id: `subsense-${idx++}-${subIdBase}-vtt-${source}`,
                 url: `${PROXY_BASE_URL}/api/subtitle/vtt/${sourceUrl}`,
                 lang,
                 label: baseLabel,
-                source
+                source,
+                ...matchMeta
             });
             out.push({
                 id: `subsense-${idx++}-${subIdBase}-srt-${source}`,
                 url: `${PROXY_BASE_URL}/api/subtitle/srt/${sourceUrl}`,
                 lang,
                 label: baseLabel,
-                source
+                source,
+                ...matchMeta
             });
         } else {
             const url = sub.needsConversion === false
@@ -108,7 +116,8 @@ function formatForStremio(subtitles) {
                 url,
                 lang,
                 label: baseLabel,
-                source
+                source,
+                ...matchMeta
             });
         }
     }

@@ -95,7 +95,7 @@ class SubtitleCache {
     }
 
     /**
-     * Stream non-expired rows for cold-start warmup.
+     * Stream non-expired rows for cold-start warmup (capped at 2000 most recent).
      * @returns {Promise<Array<{key: string, subtitles: any[]}>>}
      */
     async loadAllForWarmup() {
@@ -105,6 +105,7 @@ class SubtitleCache {
                 FROM subtitle_cache
                 WHERE updated_at > (strftime('%s','now') - ?)
                 ORDER BY updated_at DESC
+                LIMIT 2000
             `, [this.ttlSeconds]);
 
             const out = [];

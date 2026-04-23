@@ -17,7 +17,7 @@ const routes = require('./routes');
 const db = require('./cache/database-libsql');
 
 const PORT = parseInt(process.env.PORT, 10) || 3000;
-const HOST = process.env.HOST || '0.0.0.0';
+const HOST = process.env.HOST || '127.0.0.1';
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 const SHUTDOWN_TIMEOUT_MS = parseInt(process.env.SHUTDOWN_TIMEOUT_MS, 10) || 10000;
 
@@ -30,10 +30,11 @@ async function bootstrap() {
 
     app.use(express.static(PUBLIC_DIR, { fallthrough: true, maxAge: '1h' }));
     app.get(['/configure', '/:config/configure'], (_req, res) => {
-        res.sendFile(path.join(PUBLIC_DIR, 'configure.html'));
+        res.sendFile(path.join(PUBLIC_DIR, 'index.html'));
     });
 
     app.use('/api', routes.configApi);
+    app.use('/api', routes.proxy);
     app.use(routes.health);
     app.use(routes.stremio);
 

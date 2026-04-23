@@ -94,7 +94,7 @@ class ProviderManager {
             if (r.backgroundPromise) backgroundPromises.push(r.backgroundPromise);
         }
 
-        log('info', `[Providers] ${providers.length} providers in ${totalMs}ms - ${summary.join(', ')}`);
+        log('info', `[Providers] ${queryTag(query)} ${providers.length} providers in ${totalMs}ms - ${summary.join(', ')}`);
 
         return {
             subtitles: dedupe(allSubtitles),
@@ -178,6 +178,16 @@ function dedupe(list) {
         out.push(sub);
     }
     return out;
+}
+
+function queryTag(query) {
+    if (!query) return '';
+    const parts = [];
+    if (query.imdbId) parts.push(`imdb=${query.imdbId}`);
+    if (query.season != null) parts.push(`s=${query.season}`);
+    if (query.episode != null) parts.push(`e=${query.episode}`);
+    if (Array.isArray(query.languages) && query.languages.length > 0) parts.push(`langs=${query.languages.join(',')}`);
+    return parts.join(' ');
 }
 
 const providerManager = new ProviderManager();

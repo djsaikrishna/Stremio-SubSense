@@ -63,15 +63,25 @@ function parseConfigParam(raw) {
     }
 
     let config = null;
+    // 1) URL-decoded JSON (modern client-side encoded config)
     try {
         config = JSON.parse(decodeURIComponent(configString));
-    } catch (_) {
-        if (decryptConfig && isEncryptionConfigured()) {
-            try {
-                config = decryptConfig(configString);
-            } catch (decryptErr) {
-                log('warn', `[routes/stremio] config parse failed: ${decryptErr.message}`);
+    } catch (_) { /* fall through */ }
+    // 2) Legacy plain base64 JSON — try before decrypt to avoid noisy crypto errors
+    if (!config) {
+        try {
+            const decoded = Buffer.from(configString, 'base64').toString('utf8');
+            if (decoded && decoded[0] === '{') {
+                config = JSON.parse(decoded);
             }
+        } catch (_) { /* fall through */ }
+    }
+    // 3) Encrypted config (only attempt when encryption is actually configured)
+    if (!config && decryptConfig && isEncryptionConfigured()) {
+        try {
+            config = decryptConfig(configString);
+        } catch (decryptErr) {
+            log('warn', `[routes/stremio] encrypted config rejected: ${decryptErr.message}`);
         }
     }
     if (!config || typeof config !== 'object') config = {};

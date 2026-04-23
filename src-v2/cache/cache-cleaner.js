@@ -54,17 +54,6 @@ class CacheCleaner {
             await tick();
         }
 
-        // Apply the same retention to response_cache
-        try {
-            const r2 = await db.execute(`
-                DELETE FROM response_cache
-                WHERE created_at < (strftime('%s','now') - ?)
-            `, [this.ttlSeconds]);
-            totalDeleted += Number(r2.rowsAffected) || 0;
-        } catch (err) {
-            log('warn', `[CacheCleaner] response_cache prune failed: ${err.message}`);
-        }
-
         const elapsed = Date.now() - started;
         if (totalDeleted > 0) {
             log('info', `[CacheCleaner] removed ${totalDeleted} expired rows in ${elapsed}ms`);

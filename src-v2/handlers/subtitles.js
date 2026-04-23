@@ -38,6 +38,10 @@ async function handleSubtitlesRequest(args, parsedConfig) {
         ? safeEncrypt({ apiKey })
         : null;
 
+    const sessionInfo = parsedConfig.userId ? `session=${parsedConfig.userId}` : 'no-session';
+    const idTag = `${parsed.imdbId}${parsed.season != null ? `:${parsed.season}:${parsed.episode}` : ''}`;
+    log('info', `[Request] ${sessionInfo} ${parsed.type} ${idTag} langs=[${languages.join(',')}]${filename ? ` file="${filename}"` : ''}`);
+
     const cacheKey = ResponseCache.buildKey(
         parsed.imdbId,
         parsed.season,
@@ -48,13 +52,14 @@ async function handleSubtitlesRequest(args, parsedConfig) {
     const requestContext = {
         videoFilename: filename,
         contentType: parsed.type,
-        userApiKeys: { subsource: encryptedApiKey }
+        encryptedSubsourceKey: encryptedApiKey,
+        maxPerLang: parsedConfig.maxSubtitles || 0
     };
 
     const cached = responseCache.get(cacheKey, requestContext);
     if (cached) {
         log('info',
-            `[handler] cache ${cached.status} key=${cacheKey} -> ${cached.subtitles.length} subs in ${Date.now() - startedAt}ms`);
+            `[handler] cache-${cached.status} ${reqTag(parsed, wyzieLanguages)} -> ${cached.subtitles.length} subs in ${Date.now() - startedAt}ms`);
         if (cached.status === 'stale') {
             scheduleRefresh(parsed, wyzieLanguages, languages, parsedConfig, filename, apiKey, encryptedApiKey, cacheKey, requestContext);
         }
@@ -74,7 +79,7 @@ async function handleSubtitlesRequest(args, parsedConfig) {
         { dedupeKey: cacheKey }
     );
 
-    const formatted = buildFormatted(result.subtitles, languages, parsedConfig.maxSubtitles || 0);
+    const formatted = buildFormatted(result.subtitles, languages, 0);
 
     responseCache.set(cacheKey, formatted);
     persistL2(parsed, formatted).catch((err) =>
@@ -86,7 +91,7 @@ async function handleSubtitlesRequest(args, parsedConfig) {
 
     const finalSubs = responseCache.get(cacheKey, requestContext);
     log('info',
-        `[handler] miss -> fetched ${formatted.length} (returning ${finalSubs ? finalSubs.subtitles.length : 0}) in ${Date.now() - startedAt}ms`);
+        `[handler] miss ${reqTag(parsed, wyzieLanguages)} -> ${formatted.length} subs (returning ${finalSubs ? finalSubs.subtitles.length : 0}) in ${Date.now() - startedAt}ms`);
 
     return { subtitles: finalSubs ? finalSubs.subtitles : formatted };
 }
@@ -117,15 +122,15 @@ function wireBackgroundPromises(promises, parsed, languages, parsedConfig, cache
         }
         if (extra.length === 0) return;
 
-        const extraFormatted = buildFormatted(extra, languages, parsedConfig.maxSubtitles || 0);
+        const extraFormatted = buildFormatted(extra, languages, 0);
         const merged = mergeFormatted(foregroundFormatted, extraFormatted);
         const added = merged.length - foregroundFormatted.length;
         if (added <= 0) return;
 
         responseCache.set(cacheKey, merged);
         persistL2(parsed, merged).catch(() => {});
-        log('info', `[handler] background warm: ${cacheKey} -> ${merged.length} subs (+${added})`);
-    }).catch((err) => log('debug', `[handler] background error: ${err.message}`));
+        log('info', `[handler] bg-warm ${reqTag(parsed, uniqueLangs(merged))} -> ${merged.length} subs (+${added})`);
+    }).catch((err) => log('debug', `[handler] bg error: ${err.message}`));
 }
 
 function mergeFormatted(existing, extra) {
@@ -156,14 +161,14 @@ function scheduleRefresh(parsed, wyzieLanguages, languages, parsedConfig, filena
             encryptedApiKeys: { subsource: encryptedApiKey }
         }, { dedupeKey: `${cacheKey}:refresh` })
             .then((res) => {
-                const formatted = buildFormatted(res.subtitles, languages, parsedConfig.maxSubtitles || 0);
+                const formatted = buildFormatted(res.subtitles, languages, 0);
                 if (formatted.length > 0) {
                     responseCache.set(cacheKey, formatted);
                     persistL2(parsed, formatted).catch(() => {});
-                    log('info', `[handler] stale refresh: ${formatted.length} subs for ${cacheKey}`);
+                    log('info', `[handler] stale-refresh ${reqTag(parsed, wyzieLanguages)} -> ${formatted.length} subs`);
                 }
             })
-            .catch((err) => log('debug', `[handler] stale refresh failed: ${err.message}`));
+            .catch((err) => log('debug', `[handler] stale-refresh failed: ${err.message}`));
     });
 }
 
@@ -173,16 +178,35 @@ function uniqueLangs(formatted) {
     return Array.from(set);
 }
 
+function reqTag(parsed, languages) {
+    const parts = [];
+    if (parsed && parsed.type) parts.push(`type=${parsed.type}`);
+    if (parsed && parsed.imdbId) parts.push(`imdb=${parsed.imdbId}`);
+    if (parsed && parsed.season != null) parts.push(`s=${parsed.season}`);
+    if (parsed && parsed.episode != null) parts.push(`e=${parsed.episode}`);
+    if (Array.isArray(languages) && languages.length > 0) parts.push(`langs=${languages.join(',')}`);
+    return parts.join(' ');
+}
+
 function safeEncrypt(payload) {
     try { return encryptConfig(payload); } catch (_) { return null; }
 }
 
 async function warmupResponseCache() {
     try {
+        const memBefore = process.memoryUsage();
+        const t0 = Date.now();
+
         const entries = await subtitleCache.loadAllForWarmup();
         if (entries.length > 0) {
             responseCache.warmup(entries);
-            log('info', `[handler] warmed ResponseCache with ${entries.length} entries`);
+            const memAfter = process.memoryUsage();
+            const elapsed = Date.now() - t0;
+            const heapDeltaMB = ((memAfter.heapUsed - memBefore.heapUsed) / 1024 / 1024).toFixed(1);
+            const rssDeltaMB = ((memAfter.rss - memBefore.rss) / 1024 / 1024).toFixed(1);
+            log('info', `[handler] warmed ResponseCache with ${entries.length} entries in ${elapsed}ms (heap +${heapDeltaMB}MB, rss +${rssDeltaMB}MB)`);
+        } else {
+            log('info', '[handler] warmup skipped: no L2 entries');
         }
     } catch (err) {
         log('warn', `[handler] warmup failed: ${err.message}`);

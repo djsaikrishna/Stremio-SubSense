@@ -97,7 +97,8 @@ class ResponseCache {
         const {
             encryptedSubsourceKey = null,
             videoFilename = null,
-            contentType = 'series'
+            contentType = 'series',
+            maxPerLang = 0
         } = ctx;
 
         let result;
@@ -124,6 +125,20 @@ class ResponseCache {
             } catch (err) {
                 log('debug', `[ResponseCache] filename re-sort skipped: ${err.message}`);
             }
+        }
+
+        if (maxPerLang > 0) {
+            const byLang = new Map();
+            for (const s of result) {
+                const lang = s.lang || 'und';
+                if (!byLang.has(lang)) byLang.set(lang, []);
+                byLang.get(lang).push(s);
+            }
+            const capped = [];
+            for (const [, subs] of byLang) {
+                capped.push(...subs.slice(0, maxPerLang));
+            }
+            result = capped;
         }
 
         return result;

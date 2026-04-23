@@ -57,14 +57,6 @@ CREATE TABLE IF NOT EXISTS subtitle_cache (
 CREATE INDEX IF NOT EXISTS idx_subtitle_cache_updated
     ON subtitle_cache(updated_at);
 
-CREATE TABLE IF NOT EXISTS response_cache (
-    cache_key   TEXT    PRIMARY KEY,
-    payload     TEXT    NOT NULL,
-    created_at  INTEGER NOT NULL DEFAULT (strftime('%s','now'))
-);
-
-CREATE INDEX IF NOT EXISTS idx_response_cache_created
-    ON response_cache(created_at);
 `;
 
 const PRAGMAS = [
@@ -72,7 +64,10 @@ const PRAGMAS = [
     'PRAGMA synchronous = NORMAL',
     'PRAGMA temp_store = MEMORY',
     'PRAGMA mmap_size = 268435456',
-    'PRAGMA cache_size = -65536'
+    'PRAGMA cache_size = -65536',
+    'PRAGMA auto_vacuum = INCREMENTAL',
+    'PRAGMA busy_timeout = 5000',
+    'PRAGMA journal_size_limit = 67108864'
 ];
 
 let initialized = false;
