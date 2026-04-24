@@ -11,7 +11,7 @@
 
 const { log } = require('../../src/utils');
 const { bufferToUtf8 } = require('../../src/utils/encoding');
-const { convertSubtitle, convertToSrt, isAssFormat } = require('../../src/services/subtitle-converter');
+const { convertSubtitle, convertToSrt, isAssFormat } = require('./subtitle-converter');
 
 let AdmZip = null;
 try { AdmZip = require('adm-zip'); }
@@ -40,8 +40,6 @@ function isSubtitleEntry(name) {
 
 /**
  * Extract subtitle entries from a ZIP/RAR/raw buffer.
- *
- * @returns {Array<{name: string, getData: () => Buffer}>}
  */
 function extractSubtitleEntries(buffer) {
     if (isZipBuffer(buffer)) {
@@ -158,10 +156,6 @@ function detectEntryFormat(name) {
 
 /**
  * Convert subtitle text to the requested output format.
- *
- * @param {string} content Raw subtitle text
- * @param {'vtt'|'srt'|'ass'} requestedFormat
- * @returns {{content: string, originalFormat: string, outputFormat: string, captionCount?: number}}
  */
 function convertForOutput(content, requestedFormat) {
     const original = isAssFormat(content) ? 'ass' : detectFromContent(content);

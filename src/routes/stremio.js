@@ -31,8 +31,9 @@ router.get('/:config/manifest.json', (req, res) => {
         delete manifest.behaviorHints.configurationRequired;
     }
     const langs = config && config.languages ? config.languages.join(',') : 'none';
+    const maxSubs = config && config.maxSubtitles ? config.maxSubtitles : 'unlimited';
     const uid = config && config.userId ? config.userId : 'anon';
-    log('info', `[Manifest] ${uid} langs=[${langs}] url=/${req.params.config}/manifest.json`);
+    log('info', `[Manifest] ${uid} langs=[${langs}] maxSubs=${maxSubs} url=/${req.params.config}/manifest.json`);
     setStremioHeaders(res);
     res.json(manifest);
 });

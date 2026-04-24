@@ -1,10 +1,11 @@
 'use strict';
 
+require('dotenv').config();
+
 /**
- * SubSense v2 worker process.
+ * SubSense worker process.
  *
- * The API container handles only request traffic. This sidecar owns every
- * background job that touches the cache database:
+ * The worker owns every background job that touches the cache database:
  *
  *   - cache cleanup (TTL-based DELETE in 500-row batches, every 2h)
  *   - WAL checkpoint (PASSIVE every 30min, TRUNCATE on shutdown)
@@ -18,10 +19,10 @@
 const fs = require('fs');
 const path = require('path');
 
-const { log } = require('../src/utils');
-const db = require('./cache/database-libsql');
-const CacheCleaner = require('./cache/cache-cleaner');
-const { initStats, isFullStats, isStatsEnabled, statsDB, STATS_REFRESH_INTERVAL, flushWrites } = require('./stats');
+const { log } = require('./src/utils');
+const db = require('./src/cache/database-libsql');
+const CacheCleaner = require('./src/cache/cache-cleaner');
+const { initStats, isFullStats, isStatsEnabled, statsDB, STATS_REFRESH_INTERVAL, flushWrites } = require('./src/stats');
 
 const CLEANUP_INTERVAL_MS    = intEnv('WORKER_CLEANUP_INTERVAL_MS',    2 * 60 * 60 * 1000);
 const CHECKPOINT_INTERVAL_MS = intEnv('WORKER_CHECKPOINT_INTERVAL_MS', 30 * 60 * 1000);
@@ -29,7 +30,7 @@ const OPTIMIZE_INTERVAL_MS   = intEnv('WORKER_OPTIMIZE_INTERVAL_MS',   6 * 60 * 
 const HEALTH_INTERVAL_MS     = intEnv('WORKER_HEALTH_INTERVAL_MS',     60 * 1000);
 const SHUTDOWN_TIMEOUT_MS    = intEnv('WORKER_SHUTDOWN_TIMEOUT_MS',    15 * 1000);
 
-const DATA_DIR  = process.env.DB_DIR || path.resolve(__dirname, '..', 'data');
+const DATA_DIR  = process.env.DB_DIR || path.resolve(__dirname, 'data');
 const HEALTH_PATH = path.join(DATA_DIR, 'worker-health.json');
 
 const cleaner = new CacheCleaner();
@@ -148,7 +149,7 @@ async function writeHealthSnapshot() {
 
     let dbSizeMB = null;
     try {
-        const dbFile = path.join(DATA_DIR, 'subsense-v2.db');
+        const dbFile = path.join(DATA_DIR, 'subsense.db');
         const stat = fs.statSync(dbFile);
         dbSizeMB = +(stat.size / (1024 * 1024)).toFixed(2);
     } catch (_) { /* fresh install */ }

@@ -1,22 +1,3 @@
-# Build stage for better-sqlite3 native module
-FROM node:20-slim AS builder
-
-WORKDIR /app
-
-# Install build dependencies for better-sqlite3
-RUN apt-get update && apt-get install -y \
-    python3 \
-    make \
-    g++ \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy package files
-COPY package*.json ./
-
-# Install dependencies (including native modules)
-RUN npm install --production
-
-# Production stage
 FROM node:20-slim
 
 WORKDIR /app
@@ -24,8 +5,9 @@ WORKDIR /app
 # Create data directory for SQLite database
 RUN mkdir -p /app/data
 
-# Copy node_modules from builder
-COPY --from=builder /app/node_modules ./node_modules
+# Copy package files and install dependencies
+COPY package*.json ./
+RUN npm install --production
 
 # Copy application files
 COPY . .
