@@ -545,11 +545,6 @@ label {
 
 /* Install Button */
 @media (max-width: 520px) {
-    .install-btn {
-        padding: 14px 20px;
-        font-size: 1rem;
-    }
-    
     .dropdown-toggle-btn {
         padding: 0 12px;
     }
@@ -558,21 +553,9 @@ label {
         width: 28px;
         height: 28px;
     }
-    
-    .install-dropdown-menu {
-        min-width: 180px;
-        right: 0;
-        left: auto;
-    }
 }
 
 @media (max-width: 380px) {
-    .install-btn {
-        padding: 12px 16px;
-        font-size: 0.9rem;
-        gap: 6px;
-    }
-    
     .install-btn svg {
         width: 16px;
         height: 16px;
@@ -943,29 +926,6 @@ label {
 }
 
 /* Responsive Toggle */
-@media (max-width: 600px) {
-    .toggle-container {
-        flex-direction: column;
-        align-items: stretch;
-        gap: 12px;
-        padding: 16px;
-    }
-    
-    .toggle-group {
-        justify-content: flex-start;
-        width: 100%;
-    }
-    
-    .active-sessions-badge {
-        justify-content: center;
-        width: 100%;
-    }
-    
-    .last-updated {
-        justify-content: center;
-    }
-}
-
 /* ===== Charts & Stats ===== */
 .stats-grid {
     display: grid;
@@ -994,14 +954,6 @@ label {
     .stats-grid.grid-5 {
         grid-template-columns: repeat(3, 1fr);
     }
-    .stats-grid.grid-4 {
-        grid-template-columns: repeat(2, 1fr);
-    }
-}
-
-@media (max-width: 600px) {
-    .stats-grid.grid-6,
-    .stats-grid.grid-5,
     .stats-grid.grid-4 {
         grid-template-columns: repeat(2, 1fr);
     }
@@ -2168,38 +2120,6 @@ code:hover {
     font-size: 0.95rem;
 }
 
-/* Responsive */
-@media (max-width: 600px) {
-    .test-search-row {
-        flex-direction: column;
-    }
-    
-    .test-input-group {
-        width: 100%;
-        max-width: none;
-    }
-    
-    .test-input-imdb,
-    .test-input-season,
-    .test-input-episode,
-    .test-input-btn {
-        flex: none;
-        max-width: none;
-    }
-    
-    .test-input-season,
-    .test-input-episode {
-        width: calc(50% - 6px);
-        display: inline-flex;
-    }
-    
-    .test-results-header {
-        flex-direction: column;
-        gap: 8px;
-        align-items: flex-start;
-    }
-}
-
 /* ===== Expandable Section Styles ===== */
 .expandable-section {
     margin-top: 24px;
@@ -2495,19 +2415,542 @@ code:hover {
     text-decoration: underline;
 }
 
-/* API Keys Card Responsive */
+/* ===== Mobile Responsiveness (≤600px) ===== */
 @media (max-width: 600px) {
-    .api-key-input-wrapper {
+    /* --- Body & Container --- */
+    body {
+        padding: 16px 8px;
+    }
+
+    .container.glass {
+        padding: 20px 14px;
+        border-radius: 14px;
+    }
+
+    .container.wide {
+        max-width: 100%;
+    }
+
+    /* --- Header --- */
+    .logo-img {
+        width: 56px;
+        height: 56px;
+        border-radius: 10px;
+    }
+
+    .title {
+        font-size: 1.8rem;
+    }
+
+    .tagline {
+        font-size: 0.95rem;
+    }
+
+    .version {
+        font-size: 11px;
+        padding: 3px 10px;
+    }
+
+    .header-meta {
+        gap: 4px;
+        margin-top: 8px;
+        margin-bottom: 10px;
+    }
+
+    /* --- Navigation --- */
+    .nav-links {
+        padding: 4px;
+        gap: 4px;
+    }
+
+    .nav-links a {
+        padding: 7px 14px;
+        font-size: 13px;
+    }
+
+    .nav-links.three-col {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        min-width: 0;
+        gap: 4px;
+    }
+
+    .nav-links.three-col a {
+        justify-self: auto;
+    }
+
+    /* --- Cards --- */
+    .card {
+        padding: 18px 14px;
+        margin-bottom: 12px;
+        border-radius: 12px;
+    }
+
+    .card h2,
+    .card-title {
+        font-size: 1.1rem;
+        margin-bottom: 16px;
+        padding-bottom: 12px;
+        gap: 8px;
+    }
+
+    .section-icon {
+        width: 20px;
+        height: 20px;
+    }
+
+    .card h4 {
+        font-size: 0.85rem;
+    }
+
+    /* --- Form Groups --- */
+    .form-group {
+        margin-bottom: 18px;
+    }
+
+    label {
+        font-size: 14px;
+        margin-bottom: 8px;
+    }
+
+    .hint-text {
+        font-size: 0.8rem;
+    }
+
+    /* --- Toggle Card (ASS/SSA toggle) --- */
+    .toggle-card {
+        flex-direction: row;
+        align-items: center;
+        gap: 12px;
+        padding: 12px 14px;
+    }
+
+    .toggle-card-text {
+        gap: 6px;
+        flex: 1;
+        min-width: 0;
+    }
+
+    .toggle-card-label {
+        font-size: 13px;
+    }
+
+    /* --- Toggle Container (Stats) --- */
+    .toggle-container {
+        flex-direction: column;
+        align-items: stretch;
+        padding: 12px 14px;
+        gap: 10px;
+    }
+
+    .toggle-group {
+        justify-content: flex-start;
+        width: 100%;
+    }
+
+    .active-sessions-badge {
+        justify-content: center;
+        width: 100%;
+    }
+
+    .last-updated {
+        justify-content: center;
+    }
+
+    /* --- Expandable Section (Optional Sources) --- */
+    .expandable-header {
+        padding: 10px 12px;
+    }
+
+    .expandable-title {
+        font-size: 0.9rem;
+        gap: 8px;
         flex-wrap: wrap;
     }
-    
+
+    .expandable-title .section-icon {
+        width: 18px;
+        height: 18px;
+    }
+
+    .expandable-title .label-hint {
+        font-size: 0.8rem;
+    }
+
+    .expandable-arrow {
+        width: 20px;
+        height: 20px;
+        flex-shrink: 0;
+    }
+
+    .expandable-section.expanded .expandable-content {
+        max-height: 800px;
+        padding: 12px 2px 2px;
+    }
+
+    /* --- Optional Source Items (API Key Cards) --- */
+    .optional-source-item {
+        padding: 12px;
+    }
+
+    .source-header {
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 10px;
+    }
+
+    .source-header .api-status {
+        width: 100%;
+        margin-top: 2px;
+    }
+
+    .source-input-row {
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+
+    .api-key-input-wrapper {
+        display: contents;
+    }
+
     .api-key-input-wrapper input {
         width: 100%;
         flex: 1 1 100%;
+        order: 1;
+        padding: 10px 12px;
+        font-size: 0.85rem;
     }
-    
-    .api-key-toggle,
+
+    .api-key-toggle {
+        flex: 1;
+        order: 2;
+        height: 40px;
+    }
+
     .api-key-test-btn {
         flex: 1;
+        order: 3;
+        padding: 10px 16px;
+        font-size: 0.85rem;
+    }
+
+    .optional-source-item .hint-text {
+        font-size: 0.78rem;
+    }
+
+    /* --- Install Button --- */
+    .install-container {
+        margin-top: 20px;
+    }
+
+    .install-button-wrapper {
+        width: 100%;
+        display: flex;
+    }
+
+    .install-btn {
+        flex: 1;
+        padding: 12px 16px;
+        font-size: 0.95rem;
+    }
+
+    /* --- Install Dropdown --- */
+    .install-dropdown-menu {
+        min-width: 0;
+        width: 100%;
+        left: 0;
+        right: 0;
+    }
+
+    .install-dropdown-item {
+        font-size: 0.9rem;
+        padding: 10px 14px;
+    }
+
+    /* --- Sources Grid --- */
+    .sources-grid {
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+    }
+
+    .source-item {
+        padding: 10px 12px;
+        gap: 8px;
+        border-radius: 8px;
+    }
+
+    .source-name {
+        font-size: 0.82rem;
+    }
+
+    .source-logo {
+        width: 18px;
+        height: 18px;
+    }
+
+    .sources-description {
+        font-size: 0.9rem;
+    }
+
+    .provider-badge {
+        font-size: 0.75rem;
+        margin-bottom: 12px;
+    }
+
+    .provider-section {
+        padding: 12px;
+    }
+
+    /* --- Multiselect --- */
+    .multiselect-input-wrapper {
+        min-height: 44px;
+        padding: 5px 6px;
+    }
+
+    .multi-select-chip {
+        padding: 4px 8px;
+        font-size: 0.82rem;
+        border-radius: 6px;
+    }
+
+    .multiselect-input-wrapper input {
+        min-width: 80px;
+        font-size: 0.9rem;
+    }
+
+    /* --- Custom Select (Max Subtitles) --- */
+    .custom-select-trigger {
+        padding: 12px 36px 12px 14px;
+        font-size: 0.9rem;
+    }
+
+    /* --- Stats Grid --- */
+    .stats-grid {
+        gap: 10px;
+    }
+
+    .stats-grid.grid-6,
+    .stats-grid.grid-5,
+    .stats-grid.grid-4 {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .stat-card {
+        padding: 16px 8px;
+        border-radius: 10px;
+    }
+
+    .stat-card .value {
+        font-size: 1.3rem;
+    }
+
+    .stat-card .label {
+        font-size: 0.65rem;
+    }
+
+    /* --- Chart Containers --- */
+    .chart-container {
+        padding: 16px 12px;
+        border-radius: 12px;
+    }
+
+    .chart-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 10px;
+    }
+
+    .chart-header h3 {
+        font-size: 1rem;
+    }
+
+    /* --- Data Tables --- */
+    .data-table {
+        min-width: 400px;
+    }
+
+    .data-table th {
+        padding: 10px 8px;
+        font-size: 0.7rem;
+    }
+
+    .data-table td {
+        padding: 10px 8px;
+        font-size: 0.85rem;
+    }
+
+    /* --- Search (Content Page) --- */
+    .search-input {
+        padding: 12px 14px;
+        font-size: 0.95rem;
+        min-width: 0;
+    }
+
+    .search-btn {
+        padding: 12px 20px;
+    }
+
+    /* --- Test Subtitle Search --- */
+    .test-search-row {
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    .test-input-group {
+        width: 100%;
+        max-width: none;
+    }
+
+    .test-input-imdb,
+    .test-input-season,
+    .test-input-episode,
+    .test-input-btn {
+        flex: none;
+        max-width: none;
+    }
+
+    .test-input-season,
+    .test-input-episode {
+        width: calc(50% - 6px);
+        display: inline-flex;
+    }
+
+    .test-results-header {
+        flex-direction: column;
+        gap: 8px;
+        align-items: flex-start;
+    }
+
+    .test-input {
+        padding: 10px 12px;
+        font-size: 0.9rem;
+    }
+
+    /* --- Footer --- */
+    .footer {
+        margin-top: 24px;
+        font-size: 0.82rem;
+    }
+
+    /* --- Info Tooltip --- */
+    .info-tooltip-bubble {
+        max-width: 220px;
+        font-size: 11.5px;
+        left: auto;
+        right: -8px;
+        transform: translateY(4px);
+    }
+
+    .info-tooltip:hover .info-tooltip-bubble,
+    .info-tooltip:focus-visible .info-tooltip-bubble {
+        transform: translateY(0);
+    }
+
+    .info-tooltip-bubble::after {
+        left: auto;
+        right: 12px;
+        transform: none;
+    }
+
+    /* --- Toast --- */
+    .toast {
+        padding: 12px 20px;
+        font-size: 13px;
+        max-width: calc(100vw - 32px);
+    }
+
+    /* --- Sessions Period Selector --- */
+    .period-select {
+        font-size: 0.8rem;
+        padding: 6px 28px 6px 10px;
+    }
+
+    /* --- Combo Items --- */
+    .combo-item {
+        padding: 8px 10px;
+        font-size: 0.85rem;
+    }
+
+    /* --- Language Tags --- */
+    .language-tag {
+        font-size: 0.75rem;
+        padding: 3px 8px;
+    }
+
+    /* --- Cache Bar --- */
+    .cache-bar-container {
+        flex-direction: column;
+        gap: 8px;
+        align-items: flex-start;
+    }
+
+    .cache-bar-label {
+        font-size: 0.8rem;
+    }
+
+    /* --- Active Sessions Badge --- */
+    .active-sessions-badge {
+        font-size: 0.8rem;
+        padding: 5px 12px;
+    }
+
+    .last-updated {
+        font-size: 0.8rem;
+    }
+
+    /* --- Lang Rate Badge --- */
+    .lang-rate-badge {
+        padding: 10px 14px;
+        min-width: 60px;
+    }
+
+    .lang-rate-badge span {
+        font-size: 1rem;
+    }
+
+    /* --- Pagination --- */
+    .pagination {
+        gap: 10px;
+    }
+
+    .page-btn {
+        padding: 6px 12px;
+        font-size: 0.85rem;
+    }
+}
+
+/* --- Sources grid single column (360-400px) --- */
+@media (max-width: 400px) {
+    .sources-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* --- Extra small screens (320px) --- */
+@media (max-width: 320px) {
+    body {
+        padding: 12px 6px;
+    }
+
+    .container.glass {
+        padding: 16px 10px;
+    }
+
+    .card {
+        padding: 14px 10px;
+    }
+
+    .title {
+        font-size: 1.6rem;
+    }
+
+    .logo-img {
+        width: 48px;
+        height: 48px;
+    }
+
+    .sources-grid {
+        grid-template-columns: 1fr;
     }
 }
