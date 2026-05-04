@@ -56,8 +56,7 @@ class SubDLProvider extends BaseProvider {
             api_key: apiKey,
             imdb_id: imdbId,
             subs_per_page: '30',
-            releases: '1',
-            hi: '1'
+            releases: '1'
         };
 
         if (season != null) {
