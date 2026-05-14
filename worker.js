@@ -53,6 +53,7 @@ async function bootstrap() {
     schedule('health',     HEALTH_INTERVAL_MS,     writeHealthSnapshot);
 
     if (isFullStats() && STATS_REFRESH_INTERVAL > 0) {
+        await runStatsRecompute({ force: true }); // Force full recompute on startup
         schedule('stats-recompute', STATS_REFRESH_INTERVAL, runStatsRecompute);
     }
 
@@ -124,9 +125,9 @@ function readPragmaInt(row) {
     return Number.isFinite(n) ? n : 0;
 }
 
-async function runStatsRecompute() {
+async function runStatsRecompute(opts) {
     try {
-        await statsDB.recomputeSummary();
+        await statsDB.recomputeSummary(opts);
     } catch (err) {
         log('warn', `[worker] stats recompute failed: ${err.message}`);
     }

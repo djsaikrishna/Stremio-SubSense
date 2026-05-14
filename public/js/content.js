@@ -257,7 +257,7 @@ function displaySearchResult(data) {
             <tr>
                 <td>${ep.season !== null ? ep.season : '-'}</td>
                 <td>${ep.episode !== null ? ep.episode : '-'}</td>
-                <td>${ep.languages.size} (${[...ep.languages].join(', ')})</td>
+                <td>${ep.languages.size} (${[...ep.languages].map(l => getLanguageDisplayName(l)).join(', ')})</td>
                 <td>${ep.count}</td>
             </tr>
         `).join('');
@@ -320,7 +320,7 @@ async function loadRecentContent() {
                     <td><code>${item.imdb_id.toUpperCase()}</code></td>
                     <td>${episodeCell}</td>
                     <td>${typeBadge}</td>
-                    <td>${item.languages_cached}</td>
+                    <td>${(item.languages_cached || '').split(', ').map(l => getLanguageDisplayName(l.trim())).join(', ')}</td>
                     <td>${item.total_subtitles}</td>
                     <td>${sources}</td>
                     <td>${formatAge(item.last_updated)}</td>

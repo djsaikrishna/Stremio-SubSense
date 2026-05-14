@@ -17,7 +17,7 @@ const { registerDefaultProviders } = require('./src/providers');
 const { warmupResponseCache } = require('./src/handlers/subtitles');
 const routes = require('./src/routes');
 const db = require('./src/cache/database-libsql');
-const { initStats, getStatsMode } = require('./src/stats');
+const { initStats, getStatsMode, isFullStats, statsDB } = require('./src/stats');
 
 const PORT = parseInt(process.env.PORT, 10) || 3100;
 const HOST = process.env.HOST || '127.0.0.1';
@@ -53,6 +53,11 @@ async function bootstrap() {
     await initStats();
     log('info', `[server] stats mode: ${getStatsMode()}`);
 
+    if (isFullStats() && statsDB) {
+        statsDB.recomputeSummary({ force: true }).catch(err =>
+            log('warn', `[server] startup stats recompute failed: ${err.message}`)
+        );
+    }
     registerDefaultProviders();
     await Promise.allSettled([
         initWyzieSources().catch((err) => log('warn', `[server] Wyzie init failed: ${err.message}`)),

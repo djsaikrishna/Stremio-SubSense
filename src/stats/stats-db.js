@@ -391,10 +391,9 @@ class StatsDBAsync {
 
     async _getCacheStatsDirectQuery() {
         try {
-            const [counts, size, age] = await Promise.all([
+            const [counts, size, age, langKeysR] = await Promise.all([
                 db.execute(`
-                    SELECT COUNT(*) as total_entries, COUNT(DISTINCT imdb_id) as unique_content,
-                           COUNT(DISTINCT lang_key) as unique_languages
+                    SELECT COUNT(*) as total_entries, COUNT(DISTINCT imdb_id) as unique_content
                     FROM subtitle_cache
                 `),
                 db.execute('SELECT page_count * page_size as size_bytes FROM pragma_page_count(), pragma_page_size()'),
@@ -402,15 +401,25 @@ class StatsDBAsync {
                     SELECT MIN(updated_at) as oldest_timestamp, MAX(updated_at) as newest_timestamp,
                            AVG(strftime('%s','now') - updated_at) as avg_age_seconds
                     FROM subtitle_cache
-                `)
+                `),
+                db.execute('SELECT DISTINCT lang_key FROM subtitle_cache WHERE lang_key IS NOT NULL')
             ]);
             const c = counts.rows[0];
             const s = size.rows[0];
             const a = age.rows[0];
             const hr = await this.getCacheHitRate();
+            const individualLangs = new Set();
+            for (const row of langKeysR.rows) {
+                if (row.lang_key) {
+                    for (const l of row.lang_key.split(',')) {
+                        const t = l.trim();
+                        if (t) individualLangs.add(t);
+                    }
+                }
+            }
             return {
                 entries: c.total_entries, uniqueContent: c.unique_content,
-                uniqueLanguages: c.unique_languages, uniqueSources: 0,
+                uniqueLanguages: individualLangs.size, uniqueSources: 0,
                 sizeMB: s ? (s.size_bytes / 1024 / 1024).toFixed(2) : '0',
                 oldestAge: a.oldest_timestamp ? Math.floor(Date.now() / 1000 - a.oldest_timestamp) : 0,
                 newestAge: a.newest_timestamp ? Math.floor(Date.now() / 1000 - a.newest_timestamp) : 0,
@@ -431,7 +440,7 @@ class StatsDBAsync {
         };
     }
 
-    async recomputeSummary() {
+    async recomputeSummary({ force = false } = {}) {
         const start = Date.now();
         try {
             const [lastSummary, currentMax] = await Promise.all([
@@ -443,7 +452,7 @@ class StatsDBAsync {
             const curNewest  = currentMax.rows[0]?.max_ts || 0;
             const curCount   = currentMax.rows[0]?.cnt || 0;
 
-            if (lastNewest === curNewest && lastCount === curCount && lastCount > 0) {
+            if (!force && lastNewest === curNewest && lastCount === curCount && lastCount > 0) {
                 log('debug', '[StatsDB] summary unchanged, skipping');
                 return { success: true, skipped: true, computationTime: Date.now() - start, entries: curCount };
             }
@@ -457,10 +466,10 @@ class StatsDBAsync {
                        AVG(strftime('%s','now') - updated_at) as avg_age_seconds
                 FROM subtitle_cache
             `);
-            const [langResult, sizeResult, sourceResult] = await Promise.all([
+            const [langResult, sizeResult, subsResult] = await Promise.all([
                 db.execute(`SELECT lang_key, COUNT(*) as count FROM subtitle_cache WHERE lang_key IS NOT NULL GROUP BY lang_key ORDER BY count DESC`),
                 db.execute('SELECT page_count * page_size as size_bytes FROM pragma_page_count(), pragma_page_size()'),
-                db.execute(`SELECT provider_name, SUM(subtitles_returned) as total_subs FROM provider_stats GROUP BY provider_name ORDER BY total_subs DESC`)
+                db.execute('SELECT subtitles FROM subtitle_cache')
             ]);
             const c = combined.rows[0];
             const langDist = {};
@@ -473,9 +482,14 @@ class StatsDBAsync {
                 }
             });
             const sourceDist = {};
-            sourceResult.rows.forEach(r => {
-                if (r.provider_name && r.total_subs > 0) sourceDist[r.provider_name] = r.total_subs;
-            });
+            for (const row of subsResult.rows) {
+                try {
+                    const subs = JSON.parse(row.subtitles || '[]');
+                    for (const s of subs) {
+                        if (s.source) sourceDist[s.source] = (sourceDist[s.source] || 0) + 1;
+                    }
+                } catch (_) {}
+            }
             const uniqueSources = Object.keys(sourceDist).length;
             const sizeBytes = sizeResult.rows[0]?.size_bytes || 0;
             const hr = await this.getCacheHitRate();
@@ -536,7 +550,12 @@ class StatsDBAsync {
                 const langKeys = new Set();
 
                 for (const row of rowsR.rows) {
-                    langKeys.add(row.lang_key);
+                    if (row.lang_key) {
+                        for (const l of row.lang_key.split(',')) {
+                            const t = l.trim();
+                            if (t) langKeys.add(t);
+                        }
+                    }
                     try {
                         const subs = JSON.parse(row.subtitles || '[]');
                         totalSubs += subs.length;
@@ -574,34 +593,39 @@ class StatsDBAsync {
 
             let totalSubtitles = 0;
             const allSources = new Set();
+            const allLangs = new Set();
             const breakdown = [];
 
             for (const row of r.rows) {
-                let subtitleCount = 0;
-                const rowSources = new Set();
                 try {
                     const subs = JSON.parse(row.subtitles || '[]');
-                    subtitleCount = subs.length;
+                    const langBuckets = {};
                     for (const s of subs) {
-                        if (s.source) { rowSources.add(s.source); allSources.add(s.source); }
+                        const lang = s.lang || 'unknown';
+                        if (!langBuckets[lang]) langBuckets[lang] = { count: 0, sources: new Set() };
+                        langBuckets[lang].count++;
+                        if (s.source) { langBuckets[lang].sources.add(s.source); allSources.add(s.source); }
+                    }
+                    totalSubtitles += subs.length;
+                    for (const [lang, info] of Object.entries(langBuckets)) {
+                        allLangs.add(lang);
+                        breakdown.push({
+                            imdb_id: row.imdb_id,
+                            season: row.season === 0 ? null : row.season,
+                            episode: row.episode === 0 ? null : row.episode,
+                            language: lang,
+                            subtitle_count: info.count,
+                            sources: info.sources.size > 0 ? [...info.sources].join(',') : null,
+                            last_updated: row.updated_at
+                        });
                     }
                 } catch (_) {}
-                totalSubtitles += subtitleCount;
-                breakdown.push({
-                    imdb_id: row.imdb_id,
-                    season: row.season === 0 ? null : row.season,
-                    episode: row.episode === 0 ? null : row.episode,
-                    language: row.lang_key,
-                    subtitle_count: subtitleCount,
-                    sources: rowSources.size > 0 ? [...rowSources].join(',') : null,
-                    last_updated: row.updated_at
-                });
             }
 
             return {
                 imdbId,
                 totalSubtitles,
-                uniqueLanguages: new Set(r.rows.map(row => row.lang_key)).size,
+                uniqueLanguages: allLangs.size,
                 sources: [...allSources],
                 breakdown,
                 lastUpdated: Math.max(...r.rows.map(row => row.updated_at))
