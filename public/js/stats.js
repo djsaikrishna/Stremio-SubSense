@@ -914,18 +914,11 @@ async function loadProviderStats() {
         tbody.innerHTML = providers.map(p => {
             let statusBadge;
             const failRate = p.failed_requests / Math.max(p.total_requests, 1);
-            const lastSuccess = p.last_success_at ? new Date(p.last_success_at) : null;
-            const hoursSinceSuccess = lastSuccess ? (Date.now() - lastSuccess.getTime()) / 3600000 : null;
-            // tracked_requests = successful requests from AFTER migration (non-NULL rows only)
             const trackedRequests = p.tracked_requests || 0;
             
             if (failRate > 0.5) {
                 statusBadge = '<span class="badge badge-error">Offline</span>';
-            } else if (hoursSinceSuccess != null && hoursSinceSuccess > 24) {
-                statusBadge = '<span class="badge badge-error">Offline</span>';
-            } else if (failRate > 0.1 || (hoursSinceSuccess != null && hoursSinceSuccess > 1)) {
-                statusBadge = '<span class="badge badge-warning">Degraded</span>';
-            } else if (trackedRequests >= 5 && p.requests_with_results === 0) {
+            } else if (failRate > 0.1) {
                 statusBadge = '<span class="badge badge-warning">Degraded</span>';
             } else {
                 statusBadge = '<span class="badge badge-success">Online</span>';
