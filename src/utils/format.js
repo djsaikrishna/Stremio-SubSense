@@ -80,7 +80,8 @@ function formatForStremio(subtitles, opts = {}) {
         const source = Array.isArray(sub.source) ? sub.source[0] : (sub.source || 'Unknown');
         const isHI = !!(sub.hearingImpaired || sub.isHearingImpaired || sub.hi);
         const release = sub.releaseName || sub.release || sub.media || '';
-        const nameForLabel = sub.fileName || release || '';
+        let nameForLabel = sub.fileName || release || '';
+        if (sub.trackName) nameForLabel = nameForLabel ? `${nameForLabel} · ${sub.trackName}` : sub.trackName;
 
         const format = (sub.format || '').toLowerCase();
         const isAss = format === 'ass' || format === 'ssa' || sub.needsConversion === true;

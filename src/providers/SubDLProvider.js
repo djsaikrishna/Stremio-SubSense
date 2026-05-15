@@ -135,7 +135,6 @@ class SubDLProvider extends BaseProvider {
         const subEnd = sub.episode_end === '' || sub.episode_end == null ? null : Number(sub.episode_end);
 
         if (sub.full_season === true) {
-            // SubDL sometimes marks partial zips as full_season; verify range if available
             if (subFrom != null && subEnd != null && subEnd > 0) {
                 if (episode < subFrom || episode > subEnd) return false;
             }

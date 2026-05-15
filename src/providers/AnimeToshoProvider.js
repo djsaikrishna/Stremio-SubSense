@@ -297,10 +297,11 @@ class AnimeToshoProvider extends BaseProvider {
                 const outputFmt = (format === 'ass' && keepAss) ? 'ass' : 'vtt';
                 const proxyUrl = buildProxyUrl(this.baseUrl, sub.id, outputFmt);
 
-                const trackName = (sub.info?.name || '').toLowerCase();
-                const hearingImpaired = trackName.includes('sdh') ||
-                                       trackName.includes('hearing') ||
-                                       trackName.includes('cc');
+                const rawTrackName = sub.info?.name || '';
+                const trackNameLower = rawTrackName.toLowerCase();
+                const hearingImpaired = trackNameLower.includes('sdh') ||
+                                       trackNameLower.includes('hearing') ||
+                                       trackNameLower.includes('cc');
 
                 const displayName = langEntry ? getDisplayName(alpha2) : langCode;
 
@@ -315,6 +316,7 @@ class AnimeToshoProvider extends BaseProvider {
                     fileName: file.filename || null,
                     releases: [entry.title || ''],
                     hearingImpaired,
+                    trackName: rawTrackName || null,
                     format,
                     needsConversion: format === 'ass',
                     display: displayName

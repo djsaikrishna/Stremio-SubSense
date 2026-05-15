@@ -186,13 +186,13 @@ class BetaSeriesProvider extends BaseProvider {
             url,
             language: langEntry ? langEntry.alpha2 : 'en',
             languageCode,
-            source: sub.source || 'betaseries',
+            source: 'betaseries',
             provider: 'betaseries',
             releaseName: fileName.replace(/\.(srt|ass|ssa|zip)$/i, ''),
             hearingImpaired: false,
             rating: sub.quality || null,
             downloadCount: null,
-            display: `[${sub.source || 'betaseries'}] ${langDisplay}`,
+            display: `[betaseries] ${langDisplay}`,
             format,
             needsConversion
         });
